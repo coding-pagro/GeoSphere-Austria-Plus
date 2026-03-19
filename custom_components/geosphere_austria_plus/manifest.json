@@ -1,9 +1,9 @@
 {
   "domain": "geosphere_austria_plus",
   "name": "GeoSphere Austria Plus",
-  "version": "1.0.0",
-  "documentation": "https://github.com/your-user/geosphere-austria-plus",
-  "issue_tracker": "https://github.com/your-user/geosphere-austria-plus/issues",
+  "version": "1.1.0",
+  "documentation": "https://github.com/coding-pagro/geosphere-austria-plus",
+  "issue_tracker": "https://github.com/coding-pagro/geosphere-austria-plus/issues",
   "dependencies": [],
   "codeowners": [],
   "requirements": [],
