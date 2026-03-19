@@ -1,5 +1,6 @@
 {
   "name": "GeoSphere Austria Plus",
   "filename": "geosphere_austria_plus.zip",
-  "render_readme": true
+  "render_readme": true,
+  "logo": "https://raw.githubusercontent.com/coding-pagro/GeoSphere-Austria-Plus/main/custom_components/geosphere_austria_plus/images/logo.png"
 }

@@ -141,21 +141,40 @@ class GeoSphereApi:
         """
         Vorhersagedaten für einen Koordinatenpunkt abrufen.
         Gibt eine Liste von stündlichen Vorhersage-Dicts zurück.
+        Nicht verfügbare Parameter werden automatisch aus der Anfrage entfernt.
         """
         params = NWP_PARAMS if "nwp" in model or "ensemble" in model else "rain_acc,snow_acc,t2m,rh2m,u10m,v10m,tcc"
 
-        url = (
-            f"{API_BASE}/timeseries/forecast/{model}"
-            f"?parameters={params}&lat_lon={lat},{lon}&output_format=geojson"
-        )
-        try:
-            async with self._session.get(url, timeout=TIMEOUT) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-            raise GeoSphereApiError(f"Fehler beim Abrufen der Vorhersage: {err}") from err
+        for _attempt in range(2):
+            url = (
+                f"{API_BASE}/timeseries/forecast/{model}"
+                f"?parameters={params}&lat_lon={lat},{lon}&output_format=geojson"
+            )
+            try:
+                async with self._session.get(url, timeout=TIMEOUT) as resp:
+                    if resp.status == 400:
+                        body = await resp.json()
+                        detail = body.get("detail", "")
+                        missing = self._extract_missing_params(detail)
+                        if missing and _attempt == 0:
+                            _LOGGER.debug(
+                                "Vorhersage: Parameter %s nicht verfügbar, wird übersprungen",
+                                missing,
+                            )
+                            params = ",".join(
+                                p for p in params.split(",") if p not in missing
+                            )
+                            continue
+                        raise GeoSphereApiError(
+                            f"Fehler beim Abrufen der Vorhersage: HTTP 400 – {detail}"
+                        )
+                    resp.raise_for_status()
+                    data = await resp.json()
+            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                raise GeoSphereApiError(f"Fehler beim Abrufen der Vorhersage: {err}") from err
+            return self._parse_forecast_geojson(data)
 
-        return self._parse_forecast_geojson(data)
+        raise GeoSphereApiError("Fehler beim Abrufen der Vorhersage")
 
     def _parse_forecast_geojson(self, data: dict) -> list[dict[str, Any]]:
         """
