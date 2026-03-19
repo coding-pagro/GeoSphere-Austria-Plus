@@ -8,7 +8,7 @@ from typing import Any
 
 import aiohttp
 
-from .const import API_BASE, TAWES_RESOURCE, TAWES_PARAMS, NWP_PARAMS
+from .const import API_BASE, TAWES_RESOURCE, TAWES_PARAMS, NWP_PARAMS, ENSEMBLE_PARAMS, ENSEMBLE_PARAM_MAP
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,6 +95,27 @@ class GeoSphereApi:
         raise GeoSphereApiError(f"Fehler beim Abrufen aktueller Daten für Station {station_id}")
 
     @staticmethod
+    def _normalize_ensemble_params(entries: list[dict]) -> list[dict]:
+        """Benennt Ensemble-Parameternamen in NWP-Parameternamen um.
+
+        Ensemble liefert z. B. t2m_p50 statt t2m. Durch die Umbenennung
+        kann weather.py beide Modelle identisch verarbeiten.
+        Sunshine-Dauer (sundur, s/h) wird in approximative Wolkenbedeckung
+        tcc [0–1] umgerechnet: tcc = 1 - sundur / 3600.
+        """
+        normalized = []
+        for entry in entries:
+            new = {"datetime": entry.get("datetime")}
+            for old_key, new_key in ENSEMBLE_PARAM_MAP.items():
+                new[new_key] = entry.get(old_key)
+            # Wolkenbedeckung aus Sonnenscheindauer ableiten
+            sundur = new.pop("sundur", None)
+            if sundur is not None:
+                new["tcc"] = max(0.0, 1.0 - sundur / 3600.0)
+            normalized.append(new)
+        return normalized
+
+    @staticmethod
     def _extract_missing_params(detail: str) -> set[str]:
         """Extrahiert Parameternamen aus einer API-400-Fehlermeldung."""
         import re
@@ -143,7 +164,12 @@ class GeoSphereApi:
         Gibt eine Liste von stündlichen Vorhersage-Dicts zurück.
         Nicht verfügbare Parameter werden automatisch aus der Anfrage entfernt.
         """
-        params = NWP_PARAMS if "nwp" in model or "ensemble" in model else "rain_acc,snow_acc,t2m,rh2m,u10m,v10m,tcc"
+        if "ensemble" in model:
+            params = ENSEMBLE_PARAMS
+        elif "nwp" in model:
+            params = NWP_PARAMS
+        else:
+            params = "rain_acc,snow_acc,t2m,rh2m,u10m,v10m,tcc"  # Nowcast
 
         for _attempt in range(2):
             url = (
@@ -172,7 +198,10 @@ class GeoSphereApi:
                     data = await resp.json()
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 raise GeoSphereApiError(f"Fehler beim Abrufen der Vorhersage: {err}") from err
-            return self._parse_forecast_geojson(data)
+            result = self._parse_forecast_geojson(data)
+            if "ensemble" in model:
+                result = self._normalize_ensemble_params(result)
+            return result
 
         raise GeoSphereApiError("Fehler beim Abrufen der Vorhersage")
 

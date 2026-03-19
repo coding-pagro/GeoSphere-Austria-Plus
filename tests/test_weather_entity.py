@@ -67,7 +67,7 @@ class TestEntityMetadata:
         assert entity._attr_unique_id == "geosphere_plus_11035_nwp-v1-1h-2500m"
 
     def test_name(self, entity):
-        assert entity._attr_name == "GeoSphere 11035"
+        assert entity._attr_name == "GeoSphere 11035 NWP"
 
 
 # ---------------------------------------------------------------------------

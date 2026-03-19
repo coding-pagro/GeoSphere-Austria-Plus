@@ -25,8 +25,28 @@ FORECAST_MODELS = {
 }
 DEFAULT_FORECAST_MODEL = "nwp-v1-1h-2500m"
 
-# Vorhersageparameter (NWP)
+FORECAST_MODEL_LABELS = {
+    "nwp-v1-1h-2500m":       "NWP",
+    "ensemble-v1-1h-2500m":  "Ensemble",
+    "nowcast-v1-15min-1km":  "Nowcast",
+}
+
+# Vorhersageparameter (NWP / Nowcast)
 NWP_PARAMS = "t2m,rh2m,u10m,v10m,rain_acc,snow_acc,cape,tcc,msl"
+
+# Vorhersageparameter (Ensemble – Median-Perzentile, andere Namenskonvention)
+ENSEMBLE_PARAMS = "t2m_p50,rain_p50,snow_p50,rr_p50,sundur_p50,cape_p50"
+
+# Normalisierung: Ensemble-Parameternamen → NWP-Parameternamen
+# Ermöglicht identische Verarbeitung in weather.py
+ENSEMBLE_PARAM_MAP = {
+    "t2m_p50":    "t2m",
+    "rain_p50":   "rain_acc",
+    "snow_p50":   "snow_acc",
+    "rr_p50":     "rr",
+    "sundur_p50": "sundur",
+    "cape_p50":   "cape",
+}
 
 # Mapping: Stationsmesswerte → HA-Wetterbedingungen
 # Logik: Rang-basiert – höchster zutreffender Rang gewinnt

@@ -27,6 +27,7 @@ from .const import (
     CONF_STATION_ID,
     CONF_FORECAST_MODEL,
     DEFAULT_FORECAST_MODEL,
+    FORECAST_MODEL_LABELS,
     nwp_to_condition,
 )
 from .coordinator import GeoSphereCurrentCoordinator, GeoSphereForecastCoordinator
@@ -93,7 +94,8 @@ class GeoSphereWeatherEntity(
         self._station_id = station_id
         self._model = model
         self._attr_unique_id = f"geosphere_plus_{station_id}_{model}"
-        self._attr_name = f"GeoSphere {station_id}"
+        model_label = FORECAST_MODEL_LABELS.get(model, model)
+        self._attr_name = f"GeoSphere {station_id} {model_label}"
 
     # ------------------------------------------------------------------
     # Koordinator-Daten

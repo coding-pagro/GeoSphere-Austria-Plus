@@ -341,6 +341,58 @@ class TestGetForecast:
         url_called = session.get.call_args[0][0]
         assert "cape" in url_called
 
+    async def test_ensemble_model_uses_percentile_params(self):
+        """Ensemble model uses p50 percentile parameter names."""
+        payload = _make_forecast_payload(
+            ["2024-06-01T12:00:00Z"],
+            t2m_p50=[12.0],
+            rain_p50=[0.5],
+            snow_p50=[0.0],
+            rr_p50=[0.5],
+            sundur_p50=[1800.0],
+            cape_p50=[100.0],
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+        api = GeoSphereApi(session)
+
+        result = await api.get_forecast(48.21, 16.37, "ensemble-v1-1h-2500m")
+
+        url_called = session.get.call_args[0][0]
+        assert "t2m_p50" in url_called
+        assert "t2m" not in url_called.split("parameters=")[1].split("&")[0].replace("t2m_p50", "")
+
+        # Normalized names
+        assert result[0]["t2m"] == 12.0
+        assert result[0]["rain_acc"] == 0.5
+        assert result[0]["snow_acc"] == 0.0
+        # tcc derived from sundur: 1 - 1800/3600 = 0.5
+        assert abs(result[0]["tcc"] - 0.5) < 1e-6
+
+    async def test_ensemble_full_sunshine_gives_zero_cloud_cover(self):
+        """sundur_p50 = 3600 s → tcc = 0.0 (clear sky)."""
+        payload = _make_forecast_payload(
+            ["2024-06-01T12:00:00Z"],
+            t2m_p50=[15.0], rain_p50=[0.0], snow_p50=[0.0],
+            rr_p50=[0.0], sundur_p50=[3600.0], cape_p50=[0.0],
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v1-1h-2500m")
+        assert result[0]["tcc"] == 0.0
+
+    async def test_ensemble_no_sunshine_gives_full_cloud_cover(self):
+        """sundur_p50 = 0 s → tcc = 1.0 (overcast)."""
+        payload = _make_forecast_payload(
+            ["2024-06-01T12:00:00Z"],
+            t2m_p50=[8.0], rain_p50=[0.0], snow_p50=[0.0],
+            rr_p50=[0.0], sundur_p50=[0.0], cape_p50=[0.0],
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v1-1h-2500m")
+        assert result[0]["tcc"] == 1.0
+
 
 class TestGetStations:
     async def test_parses_station_list(self):
