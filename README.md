@@ -19,11 +19,13 @@ Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (C
 
 ### Unterstützte Vorhersagemodelle
 
-| Modell-ID | Beschreibung |
-|---|---|
-| `nwp-v1-1h-2500m` | Numerische Wettervorhersage, 1h-Auflösung, 2,5 km Gitter (Standard) |
-| `ensemble-v1-1h-2500m` | Ensemble-Vorhersage, 1h-Auflösung, 2,5 km |
-| `nowcast-v1-15min-1km` | Nowcast, 15 min-Auflösung, 1 km (kurze Vorhersagen) |
+| Modell-ID | Auflösung | Zeitraum | Beschreibung |
+|---|---|---|---|
+| `nwp-v1-1h-2500m` | 1 h / 2,5 km | ~48–72 h | **Numerische Wettervorhersage (Standard).** Physikalisches Atmosphärenmodell – gute Gesamtgenauigkeit für Temperatur, Wind und Niederschlag. |
+| `ensemble-v1-1h-2500m` | 1 h / 2,5 km | ~48–72 h | **Ensemble-Vorhersage.** Dasselbe Modell, mehrfach mit leicht unterschiedlichen Startwerten gerechnet. Robuster als ein einzelner NWP-Lauf, glättet aber Extremereignisse ab. |
+| `nowcast-v1-15min-1km` | 15 min / 1 km | 2–3 h | **Nowcast.** Keine Modellrechnung, sondern Radarextrapolation – aktuell gemessene Niederschlagszellen werden fortgeschrieben. Sehr präzise für unmittelbar bevorstehenden Regen oder Gewitter, danach rapider Qualitätsverlust. |
+
+**Empfehlung:** Für den Alltagseinsatz empfiehlt sich **NWP** (Standard). **Ensemble** liefert verlässlichere Tendenzen mit weniger Ausreißern. **Nowcast** ist sinnvoll, wenn es primär darum geht, ob es in den nächsten 1–2 Stunden regnet.
 
 ---
 
@@ -50,12 +52,13 @@ Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (C
 |---|---|
 | 11035 | Wien / Hohe Warte |
 | 11036 | Wien / Schwechat (Flughafen) |
+| 11389 | St.Pölten |
+| 11190 | Linz / Hörsching |
 | 11150 | Salzburg Flughafen |
 | 11101 | Innsbruck Flughafen |
 | 11240 | Graz Flughafen |
 | 11010 | Bregenz |
 | 11060 | Klagenfurt Flughafen |
-| 11190 | Linz / Hörsching |
 
 Alle Stations-IDs: https://dataset.api.hub.geosphere.at/v1/station/current/tawes-v1-10min/metadata
 
