@@ -207,3 +207,21 @@ marimo/_lsp/
 __marimo__/
 /.claude/
 /.idea/
+
+#from idea
+
+# Default ignored files
+/shelf/
+/workspace.xml
+# Rider ignored files
+/contentModel.xml
+/.idea.geosphere_austria.iml
+/modules.xml
+/projectSettingsUpdater.xml
+# Ignored default folder with query files
+/queries/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+# Editor-based HTTP Client requests
+/httpRequests/
