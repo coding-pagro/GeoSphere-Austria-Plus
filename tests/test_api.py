@@ -219,6 +219,22 @@ class TestParseForecastGeoJSON:
 # Async HTTP methods
 # ---------------------------------------------------------------------------
 
+class TestExtractMissingParams:
+    def test_extracts_single_param(self):
+        from custom_components.geosphere_austria_plus.api import GeoSphereApi
+        result = GeoSphereApi._extract_missing_params("Parameters {'SH'} do not exist or access is denied")
+        assert result == {"SH"}
+
+    def test_extracts_multiple_params(self):
+        from custom_components.geosphere_austria_plus.api import GeoSphereApi
+        result = GeoSphereApi._extract_missing_params("Parameters {'SH', 'FX'} do not exist or access is denied")
+        assert result == {"SH", "FX"}
+
+    def test_no_braces_returns_empty(self):
+        from custom_components.geosphere_austria_plus.api import GeoSphereApi
+        assert GeoSphereApi._extract_missing_params("some other error") == set()
+
+
 class TestGetCurrent:
     async def test_success_calls_parse(self):
         payload = {
@@ -264,6 +280,43 @@ class TestGetCurrent:
 
         with pytest.raises(GeoSphereApiError):
             await api.get_current("11035")
+
+    async def test_retries_without_unsupported_params_on_400(self):
+        """Station ohne FX/SH liefert beim ersten Versuch HTTP 400, beim zweiten 200."""
+        success_payload = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [14.0, 47.5]},
+                    "properties": {"parameters": {"TL": {"data": [12.0]}}},
+                }
+            ]
+        }
+
+        resp_400 = AsyncMock()
+        resp_400.status = 400
+        resp_400.json = AsyncMock(return_value={"detail": "Parameters {'SH', 'FX'} do not exist or access is denied"})
+        resp_400.raise_for_status = MagicMock()
+        resp_400.__aenter__ = AsyncMock(return_value=resp_400)
+        resp_400.__aexit__ = AsyncMock(return_value=False)
+
+        resp_200 = AsyncMock()
+        resp_200.status = 200
+        resp_200.json = AsyncMock(return_value=success_payload)
+        resp_200.raise_for_status = MagicMock()
+        resp_200.__aenter__ = AsyncMock(return_value=resp_200)
+        resp_200.__aexit__ = AsyncMock(return_value=False)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=[resp_400, resp_200])
+        api = GeoSphereApi(session)
+
+        result = await api.get_current("11389")
+        assert result["TL"] == 12.0
+        assert session.get.call_count == 2
+        # Zweiter Aufruf darf SH und FX nicht enthalten
+        second_url = session.get.call_args_list[1][0][0]
+        assert "SH" not in second_url
+        assert "FX" not in second_url
 
 
 class TestGetForecast:

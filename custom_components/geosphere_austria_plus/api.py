@@ -60,19 +60,48 @@ class GeoSphereApi:
         """
         Aktuelle Messwerte einer Station abrufen.
         Gibt ein flaches Dict mit Parameternamen → Wert zurück.
+        Nicht verfügbare Parameter werden automatisch aus der Anfrage entfernt.
         """
-        url = (
-            f"{API_BASE}/station/current/{TAWES_RESOURCE}"
-            f"?parameters={TAWES_PARAMS}&station_ids={station_id}&output_format=geojson"
-        )
-        try:
-            async with self._session.get(url, timeout=TIMEOUT) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-            raise GeoSphereApiError(f"Fehler beim Abrufen aktueller Daten: {err}") from err
+        params = TAWES_PARAMS
+        for _attempt in range(2):
+            url = (
+                f"{API_BASE}/station/current/{TAWES_RESOURCE}"
+                f"?parameters={params}&station_ids={station_id}&output_format=geojson"
+            )
+            try:
+                async with self._session.get(url, timeout=TIMEOUT) as resp:
+                    if resp.status == 400:
+                        body = await resp.json()
+                        detail = body.get("detail", "")
+                        missing = self._extract_missing_params(detail)
+                        if missing and _attempt == 0:
+                            _LOGGER.debug(
+                                "Station %s: Parameter %s nicht verfügbar, wird übersprungen",
+                                station_id, missing,
+                            )
+                            params = ",".join(
+                                p for p in params.split(",") if p not in missing
+                            )
+                            continue
+                        raise GeoSphereApiError(
+                            f"Fehler beim Abrufen aktueller Daten: HTTP 400 – {detail}"
+                        )
+                    resp.raise_for_status()
+                    data = await resp.json()
+            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                raise GeoSphereApiError(f"Fehler beim Abrufen aktueller Daten: {err}") from err
+            return self._parse_station_geojson(data, station_id)
 
-        return self._parse_station_geojson(data, station_id)
+        raise GeoSphereApiError(f"Fehler beim Abrufen aktueller Daten für Station {station_id}")
+
+    @staticmethod
+    def _extract_missing_params(detail: str) -> set[str]:
+        """Extrahiert Parameternamen aus einer API-400-Fehlermeldung."""
+        import re
+        match = re.search(r"\{([^}]+)\}", detail)
+        if not match:
+            return set()
+        return {p.strip().strip("'\"") for p in match.group(1).split(",")}
 
     def _parse_station_geojson(self, data: dict, station_id: str) -> dict[str, Any]:
         """GeoJSON-Antwort in flaches Parameterwert-Dict umwandeln."""
