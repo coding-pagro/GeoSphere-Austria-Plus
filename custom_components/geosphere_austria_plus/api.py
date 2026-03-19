@@ -180,28 +180,28 @@ class GeoSphereApi:
         """
         NWP GeoJSON → Liste von Zeitschritt-Dicts.
         Jedes Dict hat 'datetime' + alle Parameter als Schlüssel.
+
+        Die API liefert Zeitstempel auf oberster Ebene unter 'timestamps',
+        die Parameterwerte als 'data'-Arrays in features[0].properties.parameters.
         """
         features = data.get("features", [])
         if not features:
             return []
 
+        # Zeitstempel: immer auf oberster GeoJSON-Ebene
+        times: list[str] = (
+            data.get("timestamps")
+            or data.get("features", [{}])[0].get("properties", {}).get("datetimes", [])
+        )
+        if not times:
+            return []
+
         feature = features[0]
         props = feature.get("properties", {})
-        timestamps = props.get("parameters", {})
-
-        # Zeitstempel aus erstem Parameter extrahieren
-        times: list[str] = []
-        param_data: dict[str, list] = {}
-
-        for param_name, param_info in props.get("parameters", {}).items():
-            values = param_info.get("data", [])
-            param_data[param_name] = values
-            if not times:
-                times = param_info.get("datetimes", [])
-
-        if not times:
-            # Fallback: timestamps auf oberster Ebene
-            times = props.get("datetimes", [])
+        param_data: dict[str, list] = {
+            param_name: param_info.get("data", [])
+            for param_name, param_info in props.get("parameters", {}).items()
+        }
 
         result = []
         for i, ts in enumerate(times):

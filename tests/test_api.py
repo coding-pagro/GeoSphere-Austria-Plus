@@ -111,28 +111,31 @@ class TestParseStationGeoJSON:
 # _parse_forecast_geojson
 # ---------------------------------------------------------------------------
 
+def _make_forecast_payload(timestamps, **param_data):
+    """Erstellt eine realistische API-Antwort im tatsächlichen GeoJSON-Format."""
+    return {
+        "timestamps": timestamps,
+        "features": [
+            {
+                "properties": {
+                    "parameters": {
+                        name: {"name": name, "unit": "", "data": values}
+                        for name, values in param_data.items()
+                    }
+                }
+            }
+        ],
+    }
+
+
 class TestParseForecastGeoJSON:
     def test_basic_parsing(self):
         api = _make_api()
-        data = {
-            "features": [
-                {
-                    "properties": {
-                        "parameters": {
-                            "t2m": {
-                                "data": [10.0, 11.0, 12.0],
-                                "datetimes": [
-                                    "2024-06-01T00:00:00Z",
-                                    "2024-06-01T01:00:00Z",
-                                    "2024-06-01T02:00:00Z",
-                                ],
-                            },
-                            "rain_acc": {"data": [0.0, 0.5, 1.0]},
-                        }
-                    }
-                }
-            ]
-        }
+        data = _make_forecast_payload(
+            ["2024-06-01T00:00:00Z", "2024-06-01T01:00:00Z", "2024-06-01T02:00:00Z"],
+            t2m=[10.0, 11.0, 12.0],
+            rain_acc=[0.0, 0.5, 1.0],
+        )
         result = api._parse_forecast_geojson(data)
         assert len(result) == 3
         assert result[0]["datetime"] == "2024-06-01T00:00:00Z"
@@ -142,77 +145,43 @@ class TestParseForecastGeoJSON:
 
     def test_empty_features_returns_empty_list(self):
         api = _make_api()
-        assert api._parse_forecast_geojson({"features": []}) == []
+        assert api._parse_forecast_geojson({"timestamps": ["2024-06-01T00:00:00Z"], "features": []}) == []
 
     def test_missing_features_returns_empty_list(self):
         api = _make_api()
         assert api._parse_forecast_geojson({}) == []
 
-    def test_param_without_datetimes_returns_empty_list(self):
+    def test_no_timestamps_returns_empty_list(self):
         api = _make_api()
         data = {
-            "features": [
-                {
-                    "properties": {
-                        "parameters": {
-                            "t2m": {"data": [10.0]}
-                            # no "datetimes" key
-                        }
-                    }
-                }
-            ]
+            "features": [{"properties": {"parameters": {"t2m": {"data": [10.0]}}}}]
         }
         assert api._parse_forecast_geojson(data) == []
 
     def test_short_data_array_fills_none(self):
         api = _make_api()
-        data = {
-            "features": [
-                {
-                    "properties": {
-                        "parameters": {
-                            "t2m": {
-                                "data": [10.0, 11.0, 12.0],
-                                "datetimes": [
-                                    "2024-06-01T00:00:00Z",
-                                    "2024-06-01T01:00:00Z",
-                                    "2024-06-01T02:00:00Z",
-                                ],
-                            },
-                            "rain_acc": {"data": [0.5]},  # shorter than timestamps
-                        }
-                    }
-                }
-            ]
-        }
+        data = _make_forecast_payload(
+            ["2024-06-01T00:00:00Z", "2024-06-01T01:00:00Z", "2024-06-01T02:00:00Z"],
+            t2m=[10.0, 11.0, 12.0],
+            rain_acc=[0.5],  # kürzer als timestamps
+        )
         result = api._parse_forecast_geojson(data)
         assert result[0]["rain_acc"] == 0.5
         assert result[1]["rain_acc"] is None
         assert result[2]["rain_acc"] is None
 
-    def test_timestamps_from_first_param_with_datetimes(self):
+    def test_multiple_params_all_mapped(self):
         api = _make_api()
-        data = {
-            "features": [
-                {
-                    "properties": {
-                        "parameters": {
-                            "u10m": {"data": [1.0, 2.0]},  # no datetimes
-                            "t2m": {
-                                "data": [5.0, 6.0],
-                                "datetimes": [
-                                    "2024-06-01T00:00:00Z",
-                                    "2024-06-01T01:00:00Z",
-                                ],
-                            },
-                        }
-                    }
-                }
-            ]
-        }
+        data = _make_forecast_payload(
+            ["2024-06-01T00:00:00Z", "2024-06-01T01:00:00Z"],
+            t2m=[5.0, 6.0],
+            u10m=[1.0, 2.0],
+        )
         result = api._parse_forecast_geojson(data)
         assert len(result) == 2
-        assert result[0]["datetime"] == "2024-06-01T00:00:00Z"
+        assert result[0]["t2m"] == 5.0
+        assert result[0]["u10m"] == 1.0
+        assert result[1]["u10m"] == 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -321,20 +290,10 @@ class TestGetCurrent:
 
 class TestGetForecast:
     async def test_success_returns_list(self):
-        payload = {
-            "features": [
-                {
-                    "properties": {
-                        "parameters": {
-                            "t2m": {
-                                "data": [10.0],
-                                "datetimes": ["2024-06-01T12:00:00Z"],
-                            }
-                        }
-                    }
-                }
-            ]
-        }
+        payload = _make_forecast_payload(
+            ["2024-06-01T12:00:00Z"],
+            t2m=[10.0],
+        )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
         api = GeoSphereApi(session)
