@@ -1,5 +1,6 @@
 """Mock Home Assistant modules before any integration code is imported."""
 import sys
+import types
 from dataclasses import dataclass as _dataclass
 from unittest.mock import AsyncMock, MagicMock
 
@@ -136,13 +137,61 @@ _entity_mod.DeviceInfo = _MockDeviceInfo
 _device_registry_mod = MagicMock()
 _device_registry_mod.DeviceEntryType = _MockDeviceEntryType
 
+class _MockConfigFlow:
+    """Minimal stand-in for config_entries.ConfigFlow."""
+
+    def __init_subclass__(cls, domain=None, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+    def __init__(self):
+        self.hass = MagicMock()
+
+    def async_create_entry(self, title, data):
+        return {"type": "create_entry", "title": title, "data": data}
+
+    def async_show_form(self, step_id, data_schema=None, errors=None):
+        return {"type": "form", "step_id": step_id, "errors": errors or {}}
+
+    def _abort_if_unique_id_configured(self):
+        pass
+
+    async def async_set_unique_id(self, unique_id):
+        pass
+
+
+class _MockOptionsFlow:
+    """Minimal stand-in for config_entries.OptionsFlow."""
+
+    def __init__(self):
+        self.config_entry = MagicMock()
+        self.config_entry.options = {}
+        self.config_entry.data = {}
+
+    def async_create_entry(self, title, data):
+        return {"type": "create_entry", "title": title, "data": data}
+
+    def async_show_form(self, step_id, data_schema=None, errors=None):
+        return {"type": "form", "step_id": step_id, "errors": errors or {}}
+
+
+_config_entries_mod = MagicMock()
+_config_entries_mod.ConfigFlow = _MockConfigFlow
+_config_entries_mod.OptionsFlow = _MockOptionsFlow
+_config_entries_mod.ConfigEntryNotReady = Exception
+_config_entries_mod.callback = lambda f: f
+
+# Echtes Modulobjekt für homeassistant, damit `from homeassistant import config_entries`
+# das richtige Mock-Objekt liefert (MagicMock.__getattr__ überschreibt sonst den Wert).
+_ha_mod = types.ModuleType("homeassistant")
+_ha_mod.config_entries = _config_entries_mod
+
 sys.modules.update(
     {
-        "homeassistant": MagicMock(),
+        "homeassistant": _ha_mod,
         "homeassistant.components": MagicMock(),
         "homeassistant.components.sensor": _sensor_mod,
         "homeassistant.components.weather": _weather_mod,
-        "homeassistant.config_entries": MagicMock(),
+        "homeassistant.config_entries": _config_entries_mod,
         "homeassistant.const": _const_mod,
         "homeassistant.core": MagicMock(),
         "homeassistant.helpers": MagicMock(),
@@ -156,7 +205,7 @@ sys.modules.update(
     }
 )
 
-# Pre-import weather.py now so the class definition runs with the correct
-# sys.modules state, before other test files can trigger coordinator imports
-# that might disturb the MagicMock parent module's attribute resolution.
+# Pre-import integration modules so class definitions run with the correct
+# sys.modules state, before test files trigger their own imports.
 from custom_components.geosphere_austria_plus import weather as _weather_module  # noqa: E402
+from custom_components.geosphere_austria_plus import config_flow as _config_flow_module  # noqa: E402

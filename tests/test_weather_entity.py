@@ -2,7 +2,7 @@
 import math
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.geosphere_austria_plus.weather import GeoSphereWeatherEntity
 
@@ -148,10 +148,15 @@ class TestConditionDerivation:
         self._set(current_coord, RR=0.2)
         assert entity.condition == "rainy"
 
-    def test_rain_takes_priority_over_snow(self, entity, current_coord):
-        # Heavy rain is checked before snow
+    def test_snow_and_rain_gives_snowy_rainy(self, entity, current_coord):
+        # Snow+rain mix is checked before pure rain thresholds
+        self._set(current_coord, RR=0.5, SH=5.0)
+        assert entity.condition == "snowy-rainy"
+
+    def test_heavy_rain_with_snow_gives_snowy_rainy_not_pouring(self, entity, current_coord):
+        # Even with heavy rain, snow presence → snowy-rainy takes priority
         self._set(current_coord, RR=2.0, SH=10.0)
-        assert entity.condition == "pouring"
+        assert entity.condition == "snowy-rainy"
 
     def test_snowy_when_snow_present(self, entity, current_coord):
         self._set(current_coord, RR=0.0, SH=5.0)
@@ -199,6 +204,50 @@ class TestConditionDerivation:
         current_coord.data = {}
         cond = entity.condition
         assert cond in ("sunny", "clear-night")
+
+
+# ---------------------------------------------------------------------------
+# _is_daytime (sun.sun integration)
+# ---------------------------------------------------------------------------
+
+class TestIsDaytime:
+    def test_uses_sun_entity_above_horizon(self, entity, current_coord):
+        entity.hass = MagicMock()
+        sun_state = MagicMock()
+        sun_state.state = "above_horizon"
+        entity.hass.states.get.return_value = sun_state
+        assert entity._is_daytime() is True
+
+    def test_uses_sun_entity_below_horizon(self, entity, current_coord):
+        entity.hass = MagicMock()
+        sun_state = MagicMock()
+        sun_state.state = "below_horizon"
+        entity.hass.states.get.return_value = sun_state
+        assert entity._is_daytime() is False
+
+    def test_falls_back_to_longitude_when_sun_entity_unavailable(
+        self, entity, current_coord
+    ):
+        entity.hass = MagicMock()
+        entity.hass.states.get.return_value = None
+        current_coord.data = {"_lon": 15.0}
+        # 12:00 UTC + 1h offset → 13:00 local → daytime
+        with patch(
+            "custom_components.geosphere_austria_plus.weather.datetime"
+        ) as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc)
+            assert entity._is_daytime() is True
+
+    def test_falls_back_to_longitude_when_hass_not_set(self, entity, current_coord):
+        # hass not set at all (before async_added_to_hass)
+        if hasattr(entity, "hass"):
+            del entity.hass
+        current_coord.data = {"_lon": 15.0}
+        with patch(
+            "custom_components.geosphere_austria_plus.weather.datetime"
+        ) as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc)
+            assert entity._is_daytime() is True
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +371,35 @@ class TestBuildHourlyForecasts:
 # ---------------------------------------------------------------------------
 
 class TestBuildDailyForecasts:
+    def _acc_entries(
+        self,
+        day_offset: int,
+        rain_total: float = 0.0,
+        snow_total: float = 0.0,
+        count: int = 4,
+    ) -> list:
+        """Entries where rain_acc/snow_acc increase monotonically (accumulated style).
+
+        max(rain_acc) - min(rain_acc) == rain_total after the fix.
+        """
+        base_dt = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=day_offset)
+        )
+        return [
+            {
+                "datetime": (base_dt + timedelta(hours=i)).isoformat(),
+                "t2m": 10.0,
+                "rain_acc": rain_total * i / max(count - 1, 1),
+                "snow_acc": snow_total * i / max(count - 1, 1),
+                "rh2m": 65.0,
+                "u10m": 2.0,
+                "v10m": 2.0,
+                "tcc": 0.3,
+            }
+            for i in range(count)
+        ]
+
     def _day_entries(self, day_offset: int = 1, count: int = 24, **overrides) -> list:
         """Generate `count` hourly entries starting at midnight UTC on day+offset."""
         base_dt = (
@@ -362,26 +440,34 @@ class TestBuildDailyForecasts:
         assert forecasts[0].native_temperature == pytest.approx(11.5)
         assert forecasts[0].native_templow == pytest.approx(10.0)
 
-    def test_rain_sum_above_2mm_gives_rainy(self, entity, current_coord, forecast_coord):
+    def test_rain_above_2mm_gives_rainy(self, entity, current_coord, forecast_coord):
         current_coord.data = {}
-        # 24 × 0.2 mm = 4.8 mm → rainy
-        forecast_coord.data = self._day_entries(day_offset=1, rain_acc=0.2)
+        # Accumulated: 0.0 → 4.8 mm, range = 4.8 mm → rainy
+        forecast_coord.data = self._acc_entries(day_offset=1, rain_total=4.8)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "rainy"
 
-    def test_rain_sum_above_10mm_gives_pouring(self, entity, current_coord, forecast_coord):
+    def test_rain_above_10mm_gives_pouring(self, entity, current_coord, forecast_coord):
         current_coord.data = {}
-        # 24 × 0.5 mm = 12 mm → pouring
-        forecast_coord.data = self._day_entries(day_offset=1, rain_acc=0.5)
+        # Accumulated: 0.0 → 12.0 mm, range = 12.0 mm → pouring
+        forecast_coord.data = self._acc_entries(day_offset=1, rain_total=12.0)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "pouring"
 
-    def test_snow_sum_above_2mm_gives_snowy(self, entity, current_coord, forecast_coord):
+    def test_snow_above_2mm_gives_snowy(self, entity, current_coord, forecast_coord):
         current_coord.data = {}
-        # 24 × 0.2 mm = 4.8 mm snow → snowy
-        forecast_coord.data = self._day_entries(day_offset=1, snow_acc=0.2)
+        # Accumulated: 0.0 → 4.8 mm snow, range = 4.8 mm → snowy
+        forecast_coord.data = self._acc_entries(day_offset=1, snow_total=4.8)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "snowy"
+
+    def test_precipitation_is_range_not_sum(self, entity, current_coord, forecast_coord):
+        """native_precipitation muss max-min sein, nicht die Summe der akkumulierten Werte."""
+        current_coord.data = {}
+        # Accumulated: [0.0, 3.0, 6.0, 9.0] → range = 9.0, sum = 18.0
+        forecast_coord.data = self._acc_entries(day_offset=1, rain_total=9.0, count=4)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_precipitation == pytest.approx(9.0)
 
     def test_capped_at_7_days(self, entity, current_coord, forecast_coord):
         current_coord.data = {}
@@ -416,23 +502,25 @@ class TestBuildDailyForecasts:
 # ---------------------------------------------------------------------------
 
 class TestAsyncForecastMethods:
-    async def test_async_forecast_hourly_triggers_refresh(
+    async def test_async_forecast_hourly_does_not_refresh(
         self, entity, current_coord, forecast_coord
     ):
+        """Coordinator-Refresh darf nicht bei jedem Frontend-Aufruf ausgelöst werden."""
         current_coord.data = {}
         forecast_coord.data = []
 
         await entity.async_forecast_hourly()
-        forecast_coord.async_request_refresh.assert_called_once()
+        forecast_coord.async_request_refresh.assert_not_called()
 
-    async def test_async_forecast_daily_triggers_refresh(
+    async def test_async_forecast_daily_does_not_refresh(
         self, entity, current_coord, forecast_coord
     ):
+        """Coordinator-Refresh darf nicht bei jedem Frontend-Aufruf ausgelöst werden."""
         current_coord.data = {}
         forecast_coord.data = []
 
         await entity.async_forecast_daily()
-        forecast_coord.async_request_refresh.assert_called_once()
+        forecast_coord.async_request_refresh.assert_not_called()
 
     async def test_async_forecast_hourly_returns_list(
         self, entity, current_coord, forecast_coord

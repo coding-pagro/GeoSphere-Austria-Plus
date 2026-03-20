@@ -1,7 +1,7 @@
 """GeoSphere Austria Plus – Custom Integration mit Conditions & Forecast."""
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
 from homeassistant.core import HomeAssistant
 
 from .const import (
@@ -20,19 +20,37 @@ from .coordinator import GeoSphereCurrentCoordinator, GeoSphereForecastCoordinat
 PLATFORMS = ["weather", "sensor"]
 
 
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Eintrag bei Optionsänderung neu laden."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Eintrag einrichten."""
     station_id = entry.data[CONF_STATION_ID]
-    lat = entry.data.get(CONF_LATITUDE)
-    lon = entry.data.get(CONF_LONGITUDE)
 
-    # Rückwärtskompatibilität: alter Eintrag hat einzelnes Modell (String)
-    models: list[str] = entry.data.get(CONF_FORECAST_MODELS) or [
-        entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)
-    ]
+    # Options haben Vorrang (OptionsFlow), dann Data, dann Rückwärtskompatibilität
+    models: list[str] = (
+        entry.options.get(CONF_FORECAST_MODELS)
+        or entry.data.get(CONF_FORECAST_MODELS)
+        or [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
+    )
 
     current_coordinator = GeoSphereCurrentCoordinator(hass, station_id)
     await current_coordinator.async_config_entry_first_refresh()
+
+    # Koordinaten aus Config-Entry lesen; Fallback auf frisch abgerufene Stationsdaten
+    lat = entry.data.get(CONF_LATITUDE)
+    lon = entry.data.get(CONF_LONGITUDE)
+    if lat is None or lon is None:
+        station_data = current_coordinator.data or {}
+        lat = station_data.get("_lat")
+        lon = station_data.get("_lon")
+    if lat is None or lon is None:
+        raise ConfigEntryNotReady(
+            f"Koordinaten für Station {station_id} nicht verfügbar – "
+            "bitte Integration neu einrichten."
+        )
 
     forecast_coordinators: dict[str, GeoSphereForecastCoordinator] = {}
     for model in models:
@@ -46,6 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 

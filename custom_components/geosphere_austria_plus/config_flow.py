@@ -25,10 +25,43 @@ from .const import (
 )
 
 
+class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
+    """Vorhersagemodelle nach der Ersteinrichtung ändern."""
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            models = user_input.get(CONF_FORECAST_MODELS) or [DEFAULT_FORECAST_MODEL]
+            return self.async_create_entry(title="", data={CONF_FORECAST_MODELS: models})
+
+        current_models = (
+            self.config_entry.options.get(CONF_FORECAST_MODELS)
+            or self.config_entry.data.get(CONF_FORECAST_MODELS)
+            or [DEFAULT_FORECAST_MODEL]
+        )
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_FORECAST_MODELS, default=current_models
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": k, "label": FORECAST_MODEL_LABELS[k]}
+                            for k in FORECAST_MODELS
+                        ],
+                        multiple=True,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)
+
+
 class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config Flow Handler."""
 
     VERSION = 1
+    async_get_options_flow = GeoSphereOptionsFlowHandler
 
     async def async_step_user(self, user_input=None):
         errors = {}

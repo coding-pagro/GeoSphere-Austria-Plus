@@ -14,6 +14,16 @@
       "snow_height":      {"name": "Snow Height"}
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update GeoSphere Austria Plus",
+        "data": {
+          "forecast_models": "Forecast models (select 1–3)"
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {

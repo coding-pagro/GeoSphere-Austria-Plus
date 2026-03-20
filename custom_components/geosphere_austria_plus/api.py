@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -118,7 +119,6 @@ class GeoSphereApi:
     @staticmethod
     def _extract_missing_params(detail: str) -> set[str]:
         """Extrahiert Parameternamen aus einer API-400-Fehlermeldung."""
-        import re
         match = re.search(r"\{([^}]+)\}", detail)
         if not match:
             return set()
@@ -260,10 +260,3 @@ class GeoSphereApi:
                 return station.get("name", station_id)
         return station_id
 
-    async def validate_station(self, station_id: str) -> bool:
-        """Prüft, ob eine Stations-ID gültig ist."""
-        try:
-            await self.get_current(station_id)
-            return True
-        except GeoSphereApiError:
-            return False

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -48,7 +49,7 @@ _SNOW_THRESHOLD_CM = 0.1       # SH > 0 cm Schneehöhe
 _FOG_VISIBILITY_HUM = 97       # RF > 97 % → potentiell Nebel
 _WIND_STRONG_MS = 10.0         # FF > 10 m/s → windig
 _CLOUD_FULL = 0.875            # Als bewölkt gilt > 87.5 % SO-Ausfall
-_SUN_MINUTES_MAX = 10          # SO in Sekunden je 10 min
+_SUN_SECONDS_MAX = 600         # SO max. 600 s Sonnenschein je 10-Minuten-Intervall
 
 
 async def async_setup_entry(
@@ -61,10 +62,12 @@ async def async_setup_entry(
     station_id = entry.data[CONF_STATION_ID]
     station_name = entry.data.get(CONF_STATION_NAME, station_id)
 
-    # Rückwärtskompatibilität: alter Eintrag hat einzelnes Modell (String)
-    models: list[str] = entry.data.get(CONF_FORECAST_MODELS) or [
-        entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)
-    ]
+    # Options haben Vorrang (OptionsFlow), dann Data, dann Rückwärtskompatibilität
+    models: list[str] = (
+        entry.options.get(CONF_FORECAST_MODELS)
+        or entry.data.get(CONF_FORECAST_MODELS)
+        or [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
+    )
 
     async_add_entities(
         [
@@ -119,7 +122,7 @@ class GeoSphereWeatherEntity(
             identifiers={(DOMAIN, station_id)},
             name=device_name,
             manufacturer="GeoSphere Austria",
-            model=f"TAWES / {model_label}",
+            model=device_name,
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
@@ -198,6 +201,10 @@ class GeoSphereWeatherEntity(
         so = d.get("SO")              # Sonnenscheindauer Sekunden/10min (None = keine Daten)
         sh = d.get("SH") or 0.0       # Schneehöhe cm
 
+        # Schnee + Regen kombiniert (vor reinen Regen-Checks prüfen, sonst nie erreichbar)
+        if sh > _SNOW_THRESHOLD_CM and rr >= _RAIN_THRESHOLD_MM:
+            return "snowy-rainy"
+
         # Regen-Pegel
         if rr >= _HEAVY_RAIN_MM:
             return "pouring"
@@ -206,8 +213,6 @@ class GeoSphereWeatherEntity(
 
         # Schnee
         if sh > _SNOW_THRESHOLD_CM:
-            if rr >= _RAIN_THRESHOLD_MM:
-                return "snowy-rainy"
             return "snowy"
 
         # Nebel: sehr hohe Luftfeuchtigkeit ohne Wind
@@ -217,7 +222,7 @@ class GeoSphereWeatherEntity(
         # Bewölkung aus Sonnenscheindauer ableiten
         # SO = Sekunden Sonnenschein in den letzten 10 Min (max 600 s)
         if so is not None:
-            cloud_fraction = 1.0 - (so / 600.0)
+            cloud_fraction = 1.0 - (so / _SUN_SECONDS_MAX)
             if cloud_fraction >= _CLOUD_FULL:
                 if ff >= _WIND_STRONG_MS:
                     return "windy-variant"
@@ -236,7 +241,13 @@ class GeoSphereWeatherEntity(
         return "clear-night"
 
     def _is_daytime(self) -> bool:
-        """Grobe Tag/Nacht-Schätzung über UTC-Stunde + Längengrad-Offset."""
+        """Tag/Nacht aus sun.sun-Entity ableiten; Fallback auf Längengrad-Schätzung."""
+        hass = getattr(self, "hass", None)
+        if hass is not None:
+            sun_state = hass.states.get("sun.sun")
+            if sun_state is not None:
+                return sun_state.state == "above_horizon"
+        # Fallback: grobe Schätzung über UTC-Stunde + Längengrad-Offset
         now_utc = datetime.now(timezone.utc)
         lon = self._current.get("_lon") or 14.0  # Österreich default
         local_hour = (now_utc.hour + lon / 15.0) % 24
@@ -248,7 +259,6 @@ class GeoSphereWeatherEntity(
 
     async def async_forecast_hourly(self) -> list[Forecast] | None:
         """Stündliche Vorhersage aus NWP-Daten."""
-        await self._forecast_coordinator.async_request_refresh()
         return self._build_hourly_forecasts()
 
     def _build_hourly_forecasts(self) -> list[Forecast]:
@@ -304,13 +314,10 @@ class GeoSphereWeatherEntity(
 
     async def async_forecast_daily(self) -> list[Forecast] | None:
         """Tägliche Zusammenfassung aus stündlichen NWP-Daten."""
-        await self._forecast_coordinator.async_request_refresh()
         return self._build_daily_forecasts()
 
     def _build_daily_forecasts(self) -> list[Forecast]:
         """Stündliche Daten auf Tage aggregieren."""
-        from collections import defaultdict
-
         days: dict[str, list[dict]] = defaultdict(list)
         now = datetime.now(timezone.utc)
 
@@ -338,8 +345,10 @@ class GeoSphereWeatherEntity(
 
             t_max = max(temps) if temps else None
             t_min = min(temps) if temps else None
-            rain_sum = sum(rain_list)
-            snow_sum = sum(snow_list)
+            # rain_acc/snow_acc sind akkumulierte Werte seit Modellstart →
+            # Tagesmenge = max − min der akkumulierten Werte im Tagesfenster
+            rain_total = max(rain_list) - min(rain_list) if rain_list else 0.0
+            snow_total = max(snow_list) - min(snow_list) if snow_list else 0.0
             tcc_avg = sum(tcc_list) / len(tcc_list) if tcc_list else 0.0
             wind_speeds = [
                 math.sqrt((e.get("u10m") or 0.0)**2 + (e.get("v10m") or 0.0)**2)
@@ -348,12 +357,12 @@ class GeoSphereWeatherEntity(
             wind_max = max(wind_speeds) if wind_speeds else 0.0
 
             # Dominante Bedingung: schlechteste Stunde des Tages
-            cond = nwp_to_condition(tcc_avg, rain_sum / max(len(entries), 1), snow_sum / max(len(entries), 1), wind_max, True)
-            if rain_sum > 2.0:
+            cond = nwp_to_condition(tcc_avg, rain_total / max(len(entries), 1), snow_total / max(len(entries), 1), wind_max, True)
+            if rain_total > 2.0:
                 cond = "rainy"
-            if rain_sum > 10.0:
+            if rain_total > 10.0:
                 cond = "pouring"
-            if snow_sum > 2.0:
+            if snow_total > 2.0:
                 cond = "snowy"
 
             dt_day = datetime.strptime(day_key, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -363,7 +372,7 @@ class GeoSphereWeatherEntity(
                     condition=cond,
                     native_temperature=t_max,
                     native_templow=t_min,
-                    native_precipitation=rain_sum,
+                    native_precipitation=rain_total,
                     humidity=sum(rh_list) / len(rh_list) if rh_list else None,
                     native_wind_speed=wind_max,
                     is_daytime=True,

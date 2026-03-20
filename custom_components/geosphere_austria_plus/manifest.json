@@ -1,11 +1,11 @@
 {
   "domain": "geosphere_austria_plus",
   "name": "GeoSphere Austria Plus",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "documentation": "https://github.com/coding-pagro/geosphere-austria-plus",
   "issue_tracker": "https://github.com/coding-pagro/geosphere-austria-plus/issues",
   "dependencies": [],
-  "codeowners": [],
+  "codeowners": ["@coding-pagro"],
   "requirements": [],
   "iot_class": "cloud_polling",
   "integration_type": "service",

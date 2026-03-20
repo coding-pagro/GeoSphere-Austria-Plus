@@ -54,31 +54,9 @@ ENSEMBLE_PARAM_MAP = {
     "t2m_p50":    "t2m",
     "rain_p50":   "rain_acc",
     "snow_p50":   "snow_acc",
-    "rr_p50":     "rr",
     "sundur_p50": "sundur",
     "cape_p50":   "cape",
 }
-
-# Mapping: Stationsmesswerte → HA-Wetterbedingungen
-# Logik: Rang-basiert – höchster zutreffender Rang gewinnt
-# Bedingungsreihenfolge nach Priorität
-CONDITION_MAP = [
-    # (Bedingung, Beschreibung)
-    # Wird durch _derive_condition() ausgewertet
-    ("lightning-rainy", "Gewitter mit Regen"),
-    ("snowy-rainy",     "Schneeregen"),
-    ("snowy",           "Schneefall"),
-    ("rainy",           "Regen"),
-    ("pouring",         "Starkregen"),
-    ("fog",             "Nebel"),
-    ("cloudy",          "Bewölkt"),
-    ("partlycloudy",    "Teilweise bewölkt"),
-    ("windy-variant",   "Windig und bewölkt"),
-    ("windy",           "Windig"),
-    ("sunny",           "Sonnig"),
-    ("clear-night",     "Klare Nacht"),
-    ("exceptional",     "Außergewöhnlich"),
-]
 
 # NWP → HA-Condition Mapping (über Wolkenbedeckung + Niederschlag)
 # tcc = total cloud cover [0–1], rain_acc [mm], snow_acc [mm]

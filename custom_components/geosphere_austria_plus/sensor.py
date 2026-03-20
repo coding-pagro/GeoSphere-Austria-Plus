@@ -152,7 +152,7 @@ class TawesSensor(CoordinatorEntity[GeoSphereCurrentCoordinator], SensorEntity):
             identifiers={(DOMAIN, station_id)},
             name=station_name,
             manufacturer="GeoSphere Austria",
-            model="TAWES",
+            model=station_name,
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )

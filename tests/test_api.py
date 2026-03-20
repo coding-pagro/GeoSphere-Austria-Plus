@@ -421,29 +421,3 @@ class TestGetStations:
         assert await api.get_stations() == []
 
 
-class TestValidateStation:
-    async def test_valid_station_returns_true(self):
-        payload = {
-            "features": [
-                {
-                    "geometry": {"coordinates": [16.37, 48.21]},
-                    "properties": {"parameters": {"TL": {"data": [10.0]}}},
-                }
-            ]
-        }
-        session = MagicMock()
-        session.get = MagicMock(return_value=_make_mock_response(payload))
-        api = GeoSphereApi(session)
-
-        assert await api.validate_station("11035") is True
-
-    async def test_invalid_station_returns_false(self):
-        resp = AsyncMock()
-        resp.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("404"))
-        resp.__aexit__ = AsyncMock(return_value=False)
-
-        session = MagicMock()
-        session.get = MagicMock(return_value=resp)
-        api = GeoSphereApi(session)
-
-        assert await api.validate_station("99999") is False

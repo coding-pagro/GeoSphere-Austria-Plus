@@ -63,7 +63,7 @@ class GeoSphereForecastCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
         super().__init__(
             hass,
             _LOGGER,
-            name=f"{DOMAIN}_forecast_{model}",
+            name=f"{DOMAIN}_forecast_{model}_{lat}_{lon}",
             update_interval=timedelta(minutes=FORECAST_UPDATE_INTERVAL),
         )
 

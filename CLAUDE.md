@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **GeoSphere Austria Plus** is a Home Assistant custom integration that fetches weather data from the Austrian [GeoSphere DataHub API](https://dataset.api.hub.geosphere.at/v1) (no API key required). It exposes current conditions, hourly (48h), and daily (7-day) forecasts via the Home Assistant `WeatherEntity` platform.
 
-Installation is via HACS. There are no build steps, no external Python dependencies beyond Home Assistant's built-in libraries, and no test suite.
+Installation is via HACS. There are no build steps and no external Python dependencies beyond Home Assistant's built-in libraries. Tests live in `tests/` and run with `pytest`.
 
 ## Architecture
 
@@ -33,9 +33,9 @@ All integration code lives in `custom_components/geosphere_austria_plus/`.
 ### Weather Condition Derivation
 
 **Current conditions** (from TAWES parameters, priority order):
+- Snow+rain mix: SH > 0 AND RR > 0.2 mm/10 min → `snowy-rainy`
 - Heavy rain: RR > 1.0 mm/10 min → `pouring`
 - Rain: RR > 0.2 mm/10 min → `rainy`
-- Snow+rain mix → `snowy-rainy`
 - Snow: SH > 0 → `snowy`
 - Fog: RF > 97% AND FF < 2 m/s → `fog`
 - Overcast: based on SO (sunshine duration)
@@ -60,4 +60,4 @@ All integration code lives in `custom_components/geosphere_austria_plus/`.
 
 ## Translations
 
-UI strings are in `strings.json` (German source) and mirrored in `translations/de.json` and `translations/en.json`. All three files must be kept in sync when adding new config fields or error keys.
+UI strings are in `strings.json` (English source, HA convention) and mirrored in `translations/de.json` and `translations/en.json`. All three files must be kept in sync when adding new config/options fields or error keys.
