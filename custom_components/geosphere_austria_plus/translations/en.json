@@ -1,20 +1,35 @@
 {
+  "entity": {
+    "sensor": {
+      "temperature":      {"name": "Temperature"},
+      "dew_point":        {"name": "Dew Point"},
+      "humidity":         {"name": "Humidity"},
+      "wind_direction":   {"name": "Wind Direction"},
+      "wind_speed":       {"name": "Wind Speed"},
+      "wind_gust":        {"name": "Wind Gust"},
+      "pressure":         {"name": "Pressure"},
+      "pressure_reduced": {"name": "Pressure (Reduced)"},
+      "precipitation":    {"name": "Precipitation"},
+      "sunshine_duration":{"name": "Sunshine Duration"},
+      "snow_height":      {"name": "Snow Height"}
+    }
+  },
   "config": {
     "step": {
       "user": {
-        "title": "GeoSphere Austria Plus einrichten",
-        "description": "Stationskennung und Vorhersagemodell auswählen.\nDie Stationskennung (z. B. 11035 für Wien/Hohe Warte) findest du auf geosphere.at.",
+        "title": "Set up GeoSphere Austria Plus",
+        "description": "Select a TAWES station ID and one or more forecast models.\nYou can find station IDs (e.g. 11035 for Vienna/Hohe Warte) on geosphere.at.",
         "data": {
-          "station_id": "TAWES-Stations-ID",
-          "forecast_model": "Vorhersagemodell"
+          "station_id": "TAWES Station ID",
+          "forecast_models": "Forecast models (select 1–3)"
         }
       }
     },
     "error": {
-      "invalid_station": "Die angegebene Stations-ID ist ungültig oder nicht erreichbar."
+      "invalid_station": "The specified station ID is invalid or unreachable."
     },
     "abort": {
-      "already_configured": "Diese Station mit diesem Modell ist bereits eingerichtet."
+      "already_configured": "This station is already configured."
     }
   }
 }

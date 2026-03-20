@@ -34,6 +34,7 @@ def entity(current_coord, forecast_coord):
         station_id="11035",
         model="nwp-v1-1h-2500m",
         entry_id="test_entry",
+        station_name="WIEN HOHE WARTE",
     )
 
 
@@ -67,7 +68,15 @@ class TestEntityMetadata:
         assert entity._attr_unique_id == "geosphere_plus_11035_nwp-v1-1h-2500m"
 
     def test_name(self, entity):
-        assert entity._attr_name == "GeoSphere 11035 NWP"
+        assert entity._attr_name == "NWP"  # Modell-Label als Entitätsname unter Gerät
+
+    def test_device_info_set(self, entity):
+        di = entity._attr_device_info
+        assert di is not None
+        assert di["identifiers"] == {("geosphere_austria_plus", "11035")}
+        assert di["name"] == "WIEN HOHE WARTE"
+        assert di["manufacturer"] == "GeoSphere Austria"
+        assert di["entry_type"] == "service"
 
 
 # ---------------------------------------------------------------------------

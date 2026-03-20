@@ -245,6 +245,21 @@ class GeoSphereApi:
     # Hilfsmethoden
     # ------------------------------------------------------------------
 
+    async def get_station_name(self, station_id: str) -> str:
+        """Gibt den Stationsnamen aus dem Metadaten-Endpunkt zurück."""
+        url = f"{API_BASE}/station/current/{TAWES_RESOURCE}/metadata?station_ids={station_id}"
+        try:
+            async with self._session.get(url, timeout=TIMEOUT) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise GeoSphereApiError(f"Fehler beim Abrufen der Stationsmetadaten: {err}") from err
+
+        for station in data.get("stations", []):
+            if str(station.get("id")) == str(station_id):
+                return station.get("name", station_id)
+        return station_id
+
     async def validate_station(self, station_id: str) -> bool:
         """Prüft, ob eine Stations-ID gültig ist."""
         try:

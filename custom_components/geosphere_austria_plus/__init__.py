@@ -4,28 +4,45 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, CONF_STATION_ID, CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL
+from .const import (
+    DOMAIN,
+    CONF_STATION_ID,
+    CONF_FORECAST_MODEL,
+    CONF_FORECAST_MODELS,
+    CONF_LATITUDE,
+    CONF_LONGITUDE,
+    DATA_CURRENT,
+    DATA_FORECASTS,
+    DEFAULT_FORECAST_MODEL,
+)
 from .coordinator import GeoSphereCurrentCoordinator, GeoSphereForecastCoordinator
 
-PLATFORMS = ["weather"]
+PLATFORMS = ["weather", "sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Eintrag einrichten."""
     station_id = entry.data[CONF_STATION_ID]
-    model = entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)
-    lat = entry.data.get("lat")
-    lon = entry.data.get("lon")
+    lat = entry.data.get(CONF_LATITUDE)
+    lon = entry.data.get(CONF_LONGITUDE)
+
+    # Rückwärtskompatibilität: alter Eintrag hat einzelnes Modell (String)
+    models: list[str] = entry.data.get(CONF_FORECAST_MODELS) or [
+        entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)
+    ]
 
     current_coordinator = GeoSphereCurrentCoordinator(hass, station_id)
-    forecast_coordinator = GeoSphereForecastCoordinator(hass, lat, lon, model)
-
     await current_coordinator.async_config_entry_first_refresh()
-    await forecast_coordinator.async_config_entry_first_refresh()
+
+    forecast_coordinators: dict[str, GeoSphereForecastCoordinator] = {}
+    for model in models:
+        fc = GeoSphereForecastCoordinator(hass, lat, lon, model)
+        await fc.async_config_entry_first_refresh()
+        forecast_coordinators[model] = fc
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "current": current_coordinator,
-        "forecast": forecast_coordinator,
+        DATA_CURRENT: current_coordinator,
+        DATA_FORECASTS: forecast_coordinators,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

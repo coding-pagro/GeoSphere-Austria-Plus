@@ -4,7 +4,18 @@ from __future__ import annotations
 DOMAIN = "geosphere_austria_plus"
 DEFAULT_NAME = "GeoSphere Austria Plus"
 CONF_STATION_ID = "station_id"
-CONF_FORECAST_MODEL = "forecast_model"
+CONF_FORECAST_MODEL = "forecast_model"    # veraltet, nur noch für Rückwärtskompatibilität
+CONF_FORECAST_MODELS = "forecast_models"  # Liste der gewählten Modelle
+CONF_STATION_NAME = "station_name"
+CONF_LATITUDE = "lat"
+CONF_LONGITUDE = "lon"
+
+# Keys für hass.data
+DATA_CURRENT = "current"
+DATA_FORECASTS = "forecasts"
+
+# Attribution
+ATTRIBUTION = "Data provided by GeoSphere Austria"
 
 # Update-Intervalle
 CURRENT_UPDATE_INTERVAL = 10   # Minuten
@@ -17,12 +28,12 @@ API_BASE = "https://dataset.api.hub.geosphere.at/v1"
 TAWES_RESOURCE = "tawes-v1-10min"
 TAWES_PARAMS = "TL,TP,RF,DD,FF,FX,P,PRED,RR,RRM,SO,SH"
 
-# Vorhersagemodelle
-FORECAST_MODELS = {
-    "nwp-v1-1h-2500m": "NWP – Numerische Wettervorhersage (1h, 2.5 km)",
-    "ensemble-v1-1h-2500m": "Ensemble-Vorhersage (1h, 2.5 km)",
-    "nowcast-v1-15min-1km": "Nowcast (15 min, 1 km)",
-}
+# Vorhersagemodelle (gültige IDs – Bezeichnungen in den Übersetzungsdateien)
+FORECAST_MODELS = [
+    "nwp-v1-1h-2500m",
+    "ensemble-v1-1h-2500m",
+    "nowcast-v1-15min-1km",
+]
 DEFAULT_FORECAST_MODEL = "nwp-v1-1h-2500m"
 
 FORECAST_MODEL_LABELS = {

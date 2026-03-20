@@ -1,4 +1,19 @@
 {
+  "entity": {
+    "sensor": {
+      "temperature":      {"name": "Temperature"},
+      "dew_point":        {"name": "Dew Point"},
+      "humidity":         {"name": "Humidity"},
+      "wind_direction":   {"name": "Wind Direction"},
+      "wind_speed":       {"name": "Wind Speed"},
+      "wind_gust":        {"name": "Wind Gust"},
+      "pressure":         {"name": "Pressure"},
+      "pressure_reduced": {"name": "Pressure (Reduced)"},
+      "precipitation":    {"name": "Precipitation"},
+      "sunshine_duration":{"name": "Sunshine Duration"},
+      "snow_height":      {"name": "Snow Height"}
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -6,7 +21,7 @@
         "description": "Select a TAWES station ID and forecast model.\nYou can find station IDs (e.g. 11035 for Vienna/Hohe Warte) on geosphere.at.",
         "data": {
           "station_id": "TAWES Station ID",
-          "forecast_model": "Forecast model"
+          "forecast_models": "Forecast models (select 1–3)"
         }
       }
     },

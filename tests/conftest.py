@@ -1,5 +1,6 @@
 """Mock Home Assistant modules before any integration code is imported."""
 import sys
+from dataclasses import dataclass as _dataclass
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -64,6 +65,43 @@ class _MockUpdateFailed(Exception):
 # Build mock modules and inject into sys.modules
 # ---------------------------------------------------------------------------
 
+class _MockSensorEntity:
+    pass
+
+
+class _MockSensorDeviceClass:
+    TEMPERATURE = "temperature"
+    HUMIDITY = "humidity"
+    PRESSURE = "pressure"
+    WIND_SPEED = "wind_speed"
+    PRECIPITATION = "precipitation"
+    DURATION = "duration"
+
+
+class _MockSensorStateClass:
+    MEASUREMENT = "measurement"
+
+
+@_dataclass(frozen=True)
+class _MockSensorEntityDescription:
+    """Minimaler Stub für SensorEntityDescription (frozen dataclass wie das Original)."""
+    key: str = ""
+    name: str | None = None
+    icon: str | None = None
+    device_class: object = None
+    native_unit_of_measurement: str | None = None
+    state_class: object = None
+    entity_category: object = None
+    translation_key: str | None = None
+    entity_registry_enabled_default: bool = True
+
+
+_sensor_mod = MagicMock()
+_sensor_mod.SensorEntity = _MockSensorEntity
+_sensor_mod.SensorDeviceClass = _MockSensorDeviceClass
+_sensor_mod.SensorStateClass = _MockSensorStateClass
+_sensor_mod.SensorEntityDescription = _MockSensorEntityDescription
+
 _weather_mod = MagicMock()
 _weather_mod.Forecast = _MockForecast
 _weather_mod.WeatherEntity = _MockWeatherEntity
@@ -80,18 +118,45 @@ _const_mod.UnitOfPressure.HPA = "hPa"
 _const_mod.UnitOfSpeed.METERS_PER_SECOND = "m/s"
 _const_mod.UnitOfLength.MILLIMETERS = "mm"
 
+class _MockDeviceInfo(dict):
+    """Minimal stand-in for DeviceInfo (TypedDict subclass in HA)."""
+    def __init__(self, **kwargs):
+        super().__init__(kwargs)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+class _MockDeviceEntryType:
+    SERVICE = "service"
+
+
+_entity_mod = MagicMock()
+_entity_mod.DeviceInfo = _MockDeviceInfo
+
+_device_registry_mod = MagicMock()
+_device_registry_mod.DeviceEntryType = _MockDeviceEntryType
+
 sys.modules.update(
     {
         "homeassistant": MagicMock(),
         "homeassistant.components": MagicMock(),
+        "homeassistant.components.sensor": _sensor_mod,
         "homeassistant.components.weather": _weather_mod,
         "homeassistant.config_entries": MagicMock(),
         "homeassistant.const": _const_mod,
         "homeassistant.core": MagicMock(),
         "homeassistant.helpers": MagicMock(),
         "homeassistant.helpers.aiohttp_client": MagicMock(),
+        "homeassistant.helpers.device_registry": _device_registry_mod,
+        "homeassistant.helpers.entity": _entity_mod,
         "homeassistant.helpers.entity_platform": MagicMock(),
         "homeassistant.helpers.update_coordinator": _coordinator_mod,
+        "homeassistant.helpers.selector": MagicMock(),
         "voluptuous": MagicMock(),
     }
 )
+
+# Pre-import weather.py now so the class definition runs with the correct
+# sys.modules state, before other test files can trigger coordinator imports
+# that might disturb the MagicMock parent module's attribute resolution.
+from custom_components.geosphere_austria_plus import weather as _weather_module  # noqa: E402

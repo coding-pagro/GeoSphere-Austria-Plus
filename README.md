@@ -10,12 +10,32 @@ Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (C
 
 | Feature | Status |
 |---|---|
-| Aktuelle Temperatur, Feuchte, Druck, Wind | ✅ |
-| **Wetterbedingungen (condition)** | ✅ neu |
-| **Stündliche Vorhersage (hourly forecast)** | ✅ neu |
-| **Tägliche Vorhersage (daily forecast)** | ✅ neu |
-| Vorhersagemodell wählbar | ✅ |
+| **11 individuelle Sensoren** (Temperatur, Feuchte, Druck, Wind, …) | ✅ |
+| **Wetterbedingungen (condition)** | ✅ |
+| **Stündliche Vorhersage (hourly forecast, 48 h)** | ✅ |
+| **Tägliche Vorhersage (daily forecast, 7 Tage)** | ✅ |
+| 1–3 Vorhersagemodelle pro Station wählbar | ✅ |
 | Keine API-Key erforderlich | ✅ |
+
+### Sensoren
+
+Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfrage, die auch die aktuellen Wetterbedingungen liefert. Weil die Rohdaten damit ohnehin vorhanden sind, werden sie als **11 einzelne Sensor-Entitäten** direkt im Gerät exponiert, ohne einen einzigen zusätzlichen API-Call:
+
+| Sensor | Parameter | Einheit |
+|---|---|---|
+| Temperature | TL | °C |
+| Dew Point | TP | °C |
+| Humidity | RF | % |
+| Wind Direction | DD | ° |
+| Wind Speed | FF | m/s |
+| Wind Gust | FX | m/s |
+| Pressure | P | hPa |
+| Pressure (Reduced) | PRED | hPa |
+| Precipitation | RR | mm |
+| Sunshine Duration | SO | s / 10 min |
+| Snow Height | SH | cm |
+
+Alle Sensoren teilen sich dasselbe Gerät (Wetterstation) mit der Wetterentität und stehen sofort in Automationen, Dashboards und dem Energiemanagement zur Verfügung.
 
 ### Unterstützte Vorhersagemodelle
 
@@ -44,7 +64,9 @@ Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (C
 | Parameter | Beschreibung | Beispiel |
 |---|---|---|
 | TAWES-Stations-ID | Numerische ID deiner nächsten Wetterstation | `11035` (Wien/Hohe Warte) |
-| Vorhersagemodell | Eines der drei oben genannten Modelle | `nwp-v1-1h-2500m` |
+| Vorhersagemodelle | Ein oder mehrere Modelle (NWP, Ensemble, Nowcast) | NWP (Standard) |
+
+Pro Station wird **ein Gerät** angelegt. Jedes gewählte Vorhersagemodell erscheint als eigene Wetterentität darunter; die 11 Sensoren werden einmalig pro Station angelegt und von allen Modellen geteilt.
 
 ### Wichtige österreichische Stationen
 

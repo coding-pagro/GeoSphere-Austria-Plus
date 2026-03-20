@@ -19,13 +19,20 @@ from homeassistant.const import (
     UnitOfLength,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTRIBUTION,
     DOMAIN,
     CONF_STATION_ID,
     CONF_FORECAST_MODEL,
+    CONF_FORECAST_MODELS,
+    CONF_STATION_NAME,
+    DATA_CURRENT,
+    DATA_FORECASTS,
     DEFAULT_FORECAST_MODEL,
     FORECAST_MODEL_LABELS,
     nwp_to_condition,
@@ -49,20 +56,27 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Wetterentität registrieren."""
+    """Eine Wetterentität pro gewähltem Modell registrieren."""
     coordinators = hass.data[DOMAIN][entry.entry_id]
     station_id = entry.data[CONF_STATION_ID]
-    model = entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)
+    station_name = entry.data.get(CONF_STATION_NAME, station_id)
+
+    # Rückwärtskompatibilität: alter Eintrag hat einzelnes Modell (String)
+    models: list[str] = entry.data.get(CONF_FORECAST_MODELS) or [
+        entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)
+    ]
 
     async_add_entities(
         [
             GeoSphereWeatherEntity(
-                current_coordinator=coordinators["current"],
-                forecast_coordinator=coordinators["forecast"],
+                current_coordinator=coordinators[DATA_CURRENT],
+                forecast_coordinator=coordinators[DATA_FORECASTS][model],
                 station_id=station_id,
                 model=model,
                 entry_id=entry.entry_id,
+                station_name=station_name,
             )
+            for model in models
         ]
     )
 
@@ -73,6 +87,7 @@ class GeoSphereWeatherEntity(
     """Wetter-Entität mit Conditions und stündlicher/täglicher Vorhersage."""
 
     _attr_has_entity_name = True
+    _attr_attribution = ATTRIBUTION
     _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_native_pressure_unit = UnitOfPressure.HPA
     _attr_native_wind_speed_unit = UnitOfSpeed.METERS_PER_SECOND
@@ -88,14 +103,26 @@ class GeoSphereWeatherEntity(
         station_id: str,
         model: str,
         entry_id: str,
+        station_name: str | None = None,
     ) -> None:
         super().__init__(current_coordinator)
         self._forecast_coordinator = forecast_coordinator
         self._station_id = station_id
         self._model = model
         self._attr_unique_id = f"geosphere_plus_{station_id}_{model}"
+
         model_label = FORECAST_MODEL_LABELS.get(model, model)
-        self._attr_name = f"GeoSphere {station_id} {model_label}"
+        self._attr_name = model_label  # z.B. "NWP" unter Gerät "ST.POELTEN LANDHAUS"
+
+        device_name = station_name or station_id
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, station_id)},
+            name=device_name,
+            manufacturer="GeoSphere Austria",
+            model=f"TAWES / {model_label}",
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://dataset.api.hub.geosphere.at/v1",
+        )
 
     # ------------------------------------------------------------------
     # Koordinator-Daten
