@@ -75,7 +75,7 @@ class TestEntityMetadata:
         assert di is not None
         assert di["identifiers"] == {("geosphere_austria_plus", "11035")}
         assert di["name"] == "WIEN HOHE WARTE"
-        assert di["manufacturer"] == "GeoSphere Austria"
+        assert di["manufacturer"] == "Data provided by GeoSphere Austria"
         assert di["entry_type"] == "service"
 
 

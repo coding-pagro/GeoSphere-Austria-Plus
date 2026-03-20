@@ -118,7 +118,7 @@ class GeoSphereWeatherEntity(
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, station_id)},
             name=device_name,
-            manufacturer="GeoSphere Austria",
+            manufacturer="Data provided by GeoSphere Austria",
             model=device_name,
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
