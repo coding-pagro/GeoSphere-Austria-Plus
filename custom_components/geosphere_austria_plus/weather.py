@@ -95,9 +95,6 @@ class GeoSphereWeatherEntity(
     _attr_native_pressure_unit = UnitOfPressure.HPA
     _attr_native_wind_speed_unit = UnitOfSpeed.METERS_PER_SECOND
     _attr_native_precipitation_unit = UnitOfLength.MILLIMETERS
-    _attr_supported_features = (
-        WeatherEntityFeature.FORECAST_HOURLY | WeatherEntityFeature.FORECAST_DAILY
-    )
 
     def __init__(
         self,
@@ -126,6 +123,13 @@ class GeoSphereWeatherEntity(
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
+
+    @property
+    def supported_features(self) -> WeatherEntityFeature:
+        """Nowcast liefert nur kurzfristige Stundendaten – kein Daily-Forecast."""
+        if "nowcast" in self._model:
+            return WeatherEntityFeature.FORECAST_HOURLY
+        return WeatherEntityFeature.FORECAST_HOURLY | WeatherEntityFeature.FORECAST_DAILY
 
     # ------------------------------------------------------------------
     # Koordinator-Daten

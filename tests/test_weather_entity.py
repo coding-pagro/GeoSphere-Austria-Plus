@@ -560,3 +560,38 @@ class TestAsyncForecastMethods:
         result = await entity.async_forecast_daily()
         assert isinstance(result, list)
         assert len(result) >= 1
+
+
+# ---------------------------------------------------------------------------
+# supported_features
+# ---------------------------------------------------------------------------
+
+def _make_entity(model: str, current_coord, forecast_coord):
+    return GeoSphereWeatherEntity(
+        current_coordinator=current_coord,
+        forecast_coordinator=forecast_coord,
+        station_id="11035",
+        model=model,
+        entry_id="test_entry",
+        station_name="WIEN HOHE WARTE",
+    )
+
+
+class TestSupportedFeatures:
+    def test_nwp_and_ensemble_have_same_features(self, current_coord, forecast_coord):
+        """NWP und Ensemble bieten beide stündliche und tägliche Vorhersagen."""
+        nwp = _make_entity("nwp-v1-1h-2500m", current_coord, forecast_coord)
+        ensemble = _make_entity("ensemble-v1-1h-2500m", current_coord, forecast_coord)
+        assert nwp.supported_features == ensemble.supported_features
+
+    def test_nowcast_has_fewer_features_than_nwp(self, current_coord, forecast_coord):
+        """Nowcast bietet nur stündliche Vorhersagen (kein Daily)."""
+        nwp = _make_entity("nwp-v1-1h-2500m", current_coord, forecast_coord)
+        nowcast = _make_entity("nowcast-v1-15min-1km", current_coord, forecast_coord)
+        assert nowcast.supported_features != nwp.supported_features
+
+    def test_nowcast_features_are_subset_of_nwp(self, current_coord, forecast_coord):
+        """Alle Nowcast-Features sind in NWP enthalten (Nowcast ⊂ NWP)."""
+        nwp = _make_entity("nwp-v1-1h-2500m", current_coord, forecast_coord)
+        nowcast = _make_entity("nowcast-v1-15min-1km", current_coord, forecast_coord)
+        assert (nwp.supported_features & nowcast.supported_features) == nowcast.supported_features
