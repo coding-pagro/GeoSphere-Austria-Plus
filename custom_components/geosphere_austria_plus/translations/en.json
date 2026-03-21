@@ -28,15 +28,16 @@
     "step": {
       "user": {
         "title": "Set up GeoSphere Austria Plus",
-        "description": "Select a TAWES station ID and one or more forecast models.\nYou can find station IDs (e.g. 11035 for Vienna/Hohe Warte) on geosphere.at.",
+        "description": "Select a TAWES station and forecast models.",
         "data": {
-          "station_id": "TAWES Station ID",
+          "station_id": "TAWES Station",
           "forecast_models": "Forecast models (select 1–3)"
         }
       }
     },
     "error": {
-      "invalid_station": "The specified station ID is invalid or unreachable."
+      "invalid_station": "The specified station ID is invalid or unreachable.",
+      "cannot_connect": "Could not load the station list. Please check your internet connection and try again."
     },
     "abort": {
       "already_configured": "This station is already configured."

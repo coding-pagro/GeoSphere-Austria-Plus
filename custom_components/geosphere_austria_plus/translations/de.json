@@ -28,15 +28,16 @@
     "step": {
       "user": {
         "title": "GeoSphere Austria Plus einrichten",
-        "description": "Stationskennung und Vorhersagemodelle auswählen.\nDie Stationskennung (z. B. 11035 für Wien/Hohe Warte) findest du auf geosphere.at.",
+        "description": "TAWES-Station und Vorhersagemodelle auswählen.",
         "data": {
-          "station_id": "TAWES-Stations-ID",
+          "station_id": "TAWES-Station",
           "forecast_models": "Vorhersagemodelle (1–3 wählen)"
         }
       }
     },
     "error": {
-      "invalid_station": "Die angegebene Stations-ID ist ungültig oder nicht erreichbar."
+      "invalid_station": "Die angegebene Stations-ID ist ungültig oder nicht erreichbar.",
+      "cannot_connect": "Die Stationsliste konnte nicht geladen werden. Bitte Internetverbindung prüfen und erneut versuchen."
     },
     "abort": {
       "already_configured": "Diese Station ist bereits eingerichtet."

@@ -66,24 +66,37 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         errors = {}
 
+        # Stationsliste einmalig laden
+        if not hasattr(self, "_stations"):
+            api = GeoSphereApi(async_get_clientsession(self.hass))
+            try:
+                self._stations = await api.get_stations()
+            except GeoSphereApiError:
+                self._stations = []
+
         if user_input is not None:
             station_id = user_input[CONF_STATION_ID].strip()
             models = user_input.get(CONF_FORECAST_MODELS) or [DEFAULT_FORECAST_MODEL]
 
-            # Duplikat prüfen (eine Konfiguration pro Station)
             await self.async_set_unique_id(station_id)
             self._abort_if_unique_id_configured()
 
-            # Station validieren
-            api = GeoSphereApi(async_get_clientsession(self.hass))
-            try:
-                data = await api.get_current(station_id)
-                lat = data.get("_lat")
-                lon = data.get("_lon")
-                station_name = await api.get_station_name(station_id)
-            except GeoSphereApiError:
-                errors[CONF_STATION_ID] = "invalid_station"
-            else:
+            station_meta = next((s for s in self._stations if s["id"] == station_id), None)
+            lat = station_meta["lat"] if station_meta else None
+            lon = station_meta["lon"] if station_meta else None
+            station_name = station_meta["name"] if station_meta else station_id
+
+            # Koordinaten-Fallback über aktuelle Messwerte (z. B. wenn Stationsliste leer war)
+            if lat is None or lon is None:
+                api = GeoSphereApi(async_get_clientsession(self.hass))
+                try:
+                    data = await api.get_current(station_id)
+                    lat = data.get("_lat")
+                    lon = data.get("_lon")
+                except GeoSphereApiError:
+                    errors[CONF_STATION_ID] = "invalid_station"
+
+            if not errors:
                 return self.async_create_entry(
                     title=station_name,
                     data={
@@ -95,9 +108,26 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
 
+        station_options = [
+            {"value": s["id"], "label": f"{s['name']} ({s['id']})"}
+            for s in sorted(self._stations, key=lambda x: x["name"])
+        ]
+
+        if station_options:
+            station_field = SelectSelector(
+                SelectSelectorConfig(
+                    options=station_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+        else:
+            # Fallback auf Texteingabe wenn Stationsliste nicht geladen werden konnte
+            station_field = str
+            errors["base"] = "cannot_connect"
+
         schema = vol.Schema(
             {
-                vol.Required(CONF_STATION_ID): str,
+                vol.Required(CONF_STATION_ID): station_field,
                 vol.Optional(
                     CONF_FORECAST_MODELS, default=[DEFAULT_FORECAST_MODEL]
                 ): SelectSelector(
