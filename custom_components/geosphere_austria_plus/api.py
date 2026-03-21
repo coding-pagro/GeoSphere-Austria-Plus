@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -117,6 +118,53 @@ class GeoSphereApi:
         return normalized
 
     @staticmethod
+    def _normalize_nowcast_params(entries: list[dict]) -> list[dict]:
+        """Nowcast-Parameter in NWP-kompatible Namen umwandeln.
+
+        Nowcast liefert rr (Niederschlagsrate kg/m²) + pt (Niederschlagstyp)
+        statt rain_acc/snow_acc, sowie ff/dd statt u10m/v10m.
+        Wolkenbedeckung (tcc) ist nicht verfügbar → None.
+
+        pt-Kodierung (WMO-Konvention): 0/255=kein Niederschlag, 1=Regen,
+        2=Schnee, 3=gemischt/Schneeregen.
+        """
+        normalized = []
+        for entry in entries:
+            rr = entry.get("rr") or 0.0
+            pt_raw = entry.get("pt")
+            try:
+                pt_int = int(pt_raw) if pt_raw is not None else 255
+            except (ValueError, TypeError):
+                pt_int = 255
+
+            if rr == 0 or pt_int in (0, 255):
+                rain_acc, snow_acc = 0.0, 0.0
+            elif pt_int == 2:       # Schnee
+                rain_acc, snow_acc = 0.0, rr
+            elif pt_int == 3:       # Schneeregen
+                rain_acc, snow_acc = rr * 0.5, rr * 0.5
+            else:                   # 1=Regen und unbekannte Typen
+                rain_acc, snow_acc = rr, 0.0
+
+            # Windvektor aus Betrag (ff) und Richtung (dd) rekonstruieren
+            ff = entry.get("ff") or 0.0
+            dd_rad = math.radians(entry.get("dd") or 0.0)
+            u10m = -ff * math.sin(dd_rad)
+            v10m = -ff * math.cos(dd_rad)
+
+            normalized.append({
+                "datetime": entry.get("datetime"),
+                "t2m": entry.get("t2m"),
+                "rh2m": entry.get("rh2m"),
+                "rain_acc": rain_acc,
+                "snow_acc": snow_acc,
+                "u10m": u10m,
+                "v10m": v10m,
+                "tcc": None,  # Nowcast liefert keine Wolkenbedeckung
+            })
+        return normalized
+
+    @staticmethod
     def _extract_missing_params(detail: str) -> set[str]:
         """Extrahiert Parameternamen aus einer API-400-Fehlermeldung."""
         match = re.search(r"\{([^}]+)\}", detail)
@@ -169,7 +217,7 @@ class GeoSphereApi:
         elif "nwp" in model:
             params = NWP_PARAMS
         else:
-            params = "rain_acc,snow_acc,t2m,rh2m,u10m,v10m,tcc"  # Nowcast
+            params = "t2m,rh2m,ff,dd,rr,pt"  # Nowcast
 
         for _attempt in range(2):
             url = (
@@ -201,6 +249,8 @@ class GeoSphereApi:
             result = self._parse_forecast_geojson(data)
             if "ensemble" in model:
                 result = self._normalize_ensemble_params(result)
+            elif "nowcast" in model:
+                result = self._normalize_nowcast_params(result)
             return result
 
         raise GeoSphereApiError("Fehler beim Abrufen der Vorhersage")

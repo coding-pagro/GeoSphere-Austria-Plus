@@ -290,12 +290,14 @@ class GeoSphereWeatherEntity(
             rh = entry.get("rh2m")
             u10 = entry.get("u10m") or 0.0
             v10 = entry.get("v10m") or 0.0
-            tcc = entry.get("tcc") or 0.0
+            tcc = entry.get("tcc")  # None wenn Modell keinen Wolkenbedeckungswert liefert (z. B. Nowcast)
             wind_speed = math.sqrt(u10**2 + v10**2)
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
 
             is_day = self._is_dt_daytime(dt)
             cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day)
+            if cond is None:
+                cond = self.condition  # Fallback: aktuelle Bedingung (z. B. wenn kein tcc vorhanden)
 
             forecasts.append(
                 Forecast(
@@ -345,7 +347,7 @@ class GeoSphereWeatherEntity(
             rain_list = [e.get("rain_acc") or 0.0 for e in entries]
             snow_list = [e.get("snow_acc") or 0.0 for e in entries]
             rh_list = [e.get("rh2m") for e in entries if e.get("rh2m") is not None]
-            tcc_list = [e.get("tcc") or 0.0 for e in entries]
+            tcc_list = [e["tcc"] for e in entries if e.get("tcc") is not None]
 
             t_max = max(temps) if temps else None
             t_min = min(temps) if temps else None
@@ -353,7 +355,7 @@ class GeoSphereWeatherEntity(
             # Tagesmenge = max − min der akkumulierten Werte im Tagesfenster
             rain_total = max(rain_list) - min(rain_list) if rain_list else 0.0
             snow_total = max(snow_list) - min(snow_list) if snow_list else 0.0
-            tcc_avg = sum(tcc_list) / len(tcc_list) if tcc_list else 0.0
+            tcc_avg = sum(tcc_list) / len(tcc_list) if tcc_list else None
             wind_speeds = [
                 math.sqrt((e.get("u10m") or 0.0)**2 + (e.get("v10m") or 0.0)**2)
                 for e in entries
