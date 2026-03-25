@@ -61,7 +61,10 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config Flow Handler."""
 
     VERSION = 1
-    async_get_options_flow = GeoSphereOptionsFlowHandler
+
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        return GeoSphereOptionsFlowHandler()
 
     async def async_step_user(self, user_input=None):
         errors = {}
