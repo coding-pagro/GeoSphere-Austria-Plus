@@ -40,7 +40,7 @@
       "cannot_connect": "Could not load the station list. Please check your internet connection and try again."
     },
     "abort": {
-      "already_configured": "This station with this model is already configured."
+      "already_configured": "This station is already configured."
     }
   }
 }

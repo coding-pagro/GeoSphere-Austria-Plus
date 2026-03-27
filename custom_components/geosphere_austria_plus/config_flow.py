@@ -1,6 +1,8 @@
 """Config Flow für GeoSphere Austria Plus."""
 from __future__ import annotations
 
+from typing import Any
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -28,7 +30,7 @@ from .const import (
 class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
     """Vorhersagemodelle nach der Ersteinrichtung ändern."""
 
-    async def async_step_init(self, user_input=None):
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
         if user_input is not None:
             raw = user_input.get(CONF_FORECAST_MODELS) or []
             models = [m for m in raw if m in FORECAST_MODELS] or [DEFAULT_FORECAST_MODEL]
@@ -65,10 +67,12 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     _stations: list[dict] | None = None
 
     @staticmethod
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> GeoSphereOptionsFlowHandler:
         return GeoSphereOptionsFlowHandler()
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
         errors = {}
 
         # Stationsliste einmalig laden
