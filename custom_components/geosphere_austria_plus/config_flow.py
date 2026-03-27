@@ -30,7 +30,8 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
-            models = user_input.get(CONF_FORECAST_MODELS) or [DEFAULT_FORECAST_MODEL]
+            raw = user_input.get(CONF_FORECAST_MODELS) or []
+            models = [m for m in raw if m in FORECAST_MODELS] or [DEFAULT_FORECAST_MODEL]
             return self.async_create_entry(title="", data={CONF_FORECAST_MODELS: models})
 
         current_models = (
@@ -61,6 +62,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config Flow Handler."""
 
     VERSION = 1
+    _stations: list[dict] | None = None
 
     @staticmethod
     def async_get_options_flow(config_entry):
@@ -70,7 +72,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         # Stationsliste einmalig laden
-        if not hasattr(self, "_stations"):
+        if self._stations is None:
             api = GeoSphereApi(async_get_clientsession(self.hass))
             try:
                 self._stations = await api.get_stations()
@@ -79,7 +81,9 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             station_id = user_input[CONF_STATION_ID].strip()
-            models = user_input.get(CONF_FORECAST_MODELS) or [DEFAULT_FORECAST_MODEL]
+            # Nur bekannte Modell-IDs akzeptieren
+            raw_models = user_input.get(CONF_FORECAST_MODELS) or []
+            models = [m for m in raw_models if m in FORECAST_MODELS] or [DEFAULT_FORECAST_MODEL]
 
             await self.async_set_unique_id(station_id)
             self._abort_if_unique_id_configured()

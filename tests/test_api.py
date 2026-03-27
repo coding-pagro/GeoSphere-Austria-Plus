@@ -394,6 +394,167 @@ class TestGetForecast:
         assert result[0]["tcc"] == 1.0
 
 
+class TestStationIdUrlEncoding:
+    async def test_special_chars_in_station_id_are_encoded(self):
+        """Leerzeichen und Sonderzeichen in der Station-ID werden URL-kodiert."""
+        payload = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [16.37, 48.21]},
+                    "properties": {"parameters": {"TL": {"data": [15.0]}}},
+                }
+            ]
+        }
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+        api = GeoSphereApi(session)
+
+        await api.get_current("11035 extra")
+        url_called = session.get.call_args[0][0]
+        assert "11035 extra" not in url_called
+        assert "11035%20extra" in url_called
+
+    async def test_ampersand_in_station_id_is_encoded(self):
+        """& in der Station-ID darf den Query-String nicht aufbrechen."""
+        payload = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [16.37, 48.21]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+        api = GeoSphereApi(session)
+
+        await api.get_current("11035&evil=1")
+        url_called = session.get.call_args[0][0]
+        assert "11035%26evil%3D1" in url_called
+        # der injizierte Parameter darf nicht als echter Query-Parameter auftauchen
+        assert "evil=1" not in url_called.split("station_ids=")[1]
+
+    async def test_plain_numeric_station_id_unchanged(self):
+        """Reine Ziffern-IDs werden unverändert übergeben (kein unnötiges Encoding)."""
+        payload = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [16.37, 48.21]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+        api = GeoSphereApi(session)
+
+        await api.get_current("11035")
+        url_called = session.get.call_args[0][0]
+        assert "station_ids=11035" in url_called
+
+
+class TestCoordinateValidation:
+    def test_valid_coordinates_are_stored(self):
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [16.37, 48.21]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "11035")
+        assert result["_lon"] == 16.37
+        assert result["_lat"] == 48.21
+
+    def test_longitude_above_180_not_stored(self):
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [999.0, 48.21]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "11035")
+        assert "_lon" not in result
+        assert "_lat" not in result
+
+    def test_latitude_above_90_not_stored(self):
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [16.37, 999.0]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "11035")
+        assert "_lon" not in result
+        assert "_lat" not in result
+
+    def test_negative_out_of_range_not_stored(self):
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [-181.0, -91.0]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "11035")
+        assert "_lon" not in result
+        assert "_lat" not in result
+
+    def test_non_numeric_longitude_not_stored(self):
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": ["not-a-number", 48.21]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "11035")
+        assert "_lon" not in result
+        assert "_lat" not in result
+
+    def test_altitude_still_extracted_with_valid_coords(self):
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [16.37, 48.21, 200.0]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "11035")
+        assert result["_lon"] == 16.37
+        assert result["_lat"] == 48.21
+        assert result["_alt"] == 200.0
+
+    def test_boundary_values_are_valid(self):
+        """Grenzwerte ±180 lon und ±90 lat sind gültig."""
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [180.0, 90.0]},
+                    "properties": {"parameters": {}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "test")
+        assert result["_lon"] == 180.0
+        assert result["_lat"] == 90.0
+
+
 class TestGetStations:
     async def test_parses_station_list(self):
         payload = {

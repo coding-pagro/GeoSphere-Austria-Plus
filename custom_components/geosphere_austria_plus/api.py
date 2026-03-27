@@ -7,6 +7,7 @@ import math
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -68,7 +69,7 @@ class GeoSphereApi:
         for _attempt in range(2):
             url = (
                 f"{API_BASE}/station/current/{TAWES_RESOURCE}"
-                f"?parameters={params}&station_ids={station_id}&output_format=geojson"
+                f"?parameters={params}&station_ids={quote(station_id, safe='')}&output_format=geojson"
             )
             try:
                 async with self._session.get(url, timeout=TIMEOUT) as resp:
@@ -187,11 +188,25 @@ class GeoSphereApi:
             values = param_data.get("data", [])
             result[param_name] = values[-1] if values else None
 
-        # Koordinaten für spätere Verwendung
+        # Koordinaten für spätere Verwendung (mit Bounds-Validierung)
         coords = feature.get("geometry", {}).get("coordinates", [])
         if len(coords) >= 2:
-            result["_lon"] = coords[0]
-            result["_lat"] = coords[1]
+            lon_val, lat_val = coords[0], coords[1]
+            if (
+                isinstance(lon_val, (int, float))
+                and isinstance(lat_val, (int, float))
+                and -180.0 <= lon_val <= 180.0
+                and -90.0 <= lat_val <= 90.0
+            ):
+                result["_lon"] = lon_val
+                result["_lat"] = lat_val
+            else:
+                _LOGGER.warning(
+                    "Ungültige Koordinaten für Station %s: lon=%s, lat=%s",
+                    station_id,
+                    lon_val,
+                    lat_val,
+                )
         if len(coords) >= 3:
             result["_alt"] = coords[2]
 
@@ -297,7 +312,7 @@ class GeoSphereApi:
 
     async def get_station_name(self, station_id: str) -> str:
         """Gibt den Stationsnamen aus dem Metadaten-Endpunkt zurück."""
-        url = f"{API_BASE}/station/current/{TAWES_RESOURCE}/metadata?station_ids={station_id}"
+        url = f"{API_BASE}/station/current/{TAWES_RESOURCE}/metadata?station_ids={quote(station_id, safe='')}"
         try:
             async with self._session.get(url, timeout=TIMEOUT) as resp:
                 resp.raise_for_status()
