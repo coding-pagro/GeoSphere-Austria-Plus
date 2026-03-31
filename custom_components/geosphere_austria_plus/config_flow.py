@@ -145,10 +145,10 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
                 TextSelectorConfig(type=TextSelectorType.TEXT)
             ),
             vol.Required(CONF_LATITUDE, default=lat): NumberSelector(
-                NumberSelectorConfig(min=-90, max=90, step=0.0001, mode="box")
+                NumberSelectorConfig(min=-90, max=90, step=0.001, mode="box")
             ),
             vol.Required(CONF_LONGITUDE, default=lon): NumberSelector(
-                NumberSelectorConfig(min=-180, max=180, step=0.0001, mode="box")
+                NumberSelectorConfig(min=-180, max=180, step=0.001, mode="box")
             ),
             vol.Optional(CONF_STATION_ID, default=station): station_field,
             vol.Optional(CONF_FORECAST_MODELS, default=models): SelectSelector(
@@ -251,10 +251,10 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 TextSelectorConfig(type=TextSelectorType.TEXT)
             ),
             vol.Required(CONF_LATITUDE, default=self.hass.config.latitude): NumberSelector(
-                NumberSelectorConfig(min=-90, max=90, step=0.0001, mode="box")
+                NumberSelectorConfig(min=-90, max=90, step=0.001, mode="box")
             ),
             vol.Required(CONF_LONGITUDE, default=self.hass.config.longitude): NumberSelector(
-                NumberSelectorConfig(min=-180, max=180, step=0.0001, mode="box")
+                NumberSelectorConfig(min=-180, max=180, step=0.001, mode="box")
             ),
             vol.Optional(CONF_STATION_ID, default=_NO_STATION): station_field,
             vol.Optional(
