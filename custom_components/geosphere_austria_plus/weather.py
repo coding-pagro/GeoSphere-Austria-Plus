@@ -167,7 +167,7 @@ class GeoSphereWeatherEntity(
         self._attr_unique_id = f"geosphere_plus_{entry_id}_{model}"
 
         model_label = FORECAST_MODEL_LABELS.get(model, model)
-        self._attr_name = model_label
+        self._attr_name = f"({model_label})"
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},

@@ -170,7 +170,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> GeoSphereOptionsFlowHandler:
-        return GeoSphereOptionsFlowHandler(config_entry)
+        return GeoSphereOptionsFlowHandler()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
         if self._stations is None:
