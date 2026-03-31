@@ -14,6 +14,7 @@ CONF_LONGITUDE = "lon"
 DATA_CURRENT = "current"
 DATA_FORECASTS = "forecasts"
 DATA_WARNINGS = "warnings"
+DATA_AIR_QUALITY = "air_quality"
 
 # Warnungstypen (warntypid → Name)
 WARNING_TYPES: dict[int, str] = {
@@ -38,13 +39,27 @@ WARNING_LEVELS: dict[int, str] = {
 ATTRIBUTION = "Data provided by GeoSphere Austria"
 
 # Update-Intervalle
-CURRENT_UPDATE_INTERVAL = 10   # Minuten
-FORECAST_UPDATE_INTERVAL = 60  # Minuten
-WARNINGS_UPDATE_INTERVAL = 15  # Minuten
+CURRENT_UPDATE_INTERVAL = 10    # Minuten
+FORECAST_UPDATE_INTERVAL = 60   # Minuten
+WARNINGS_UPDATE_INTERVAL = 15   # Minuten
+AIR_QUALITY_UPDATE_INTERVAL = 60  # Minuten (Modell aktualisiert stündlich)
 
 # GeoSphere API
 API_BASE = "https://dataset.api.hub.geosphere.at/v1"
 WARNINGS_API_BASE = "https://warnungen.zamg.at/wsapp/api"
+
+# Schadstoffvorhersage (chem-v2-1h-3km)
+CHEM_RESOURCE = "chem-v2-1h-3km"
+CHEM_PARAMS = "no2surf,o3surf,pm10surf,pm25surf"
+
+# EU-Luftqualitätsindex-Grenzwerte: 5 Schwellenwerte für 6 Stufen (1=Gut … 6=Extrem schlecht)
+# Einheit: µg/m³. Stufe i wird vergeben, wenn Wert < breakpoints[i-1].
+AQI_BREAKPOINTS: dict[str, list[float]] = {
+    "no2surf":  [40.0, 90.0, 120.0, 230.0, 340.0],
+    "o3surf":   [50.0, 100.0, 130.0, 240.0, 380.0],
+    "pm10surf": [20.0, 40.0, 50.0, 100.0, 150.0],
+    "pm25surf": [10.0, 20.0, 25.0, 50.0, 75.0],
+}
 
 # Aktuelle Messwerte (TAWES – 10-Minuten-Auflösung)
 TAWES_RESOURCE = "tawes-v1-10min"

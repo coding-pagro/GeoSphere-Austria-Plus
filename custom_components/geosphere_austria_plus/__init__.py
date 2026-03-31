@@ -1,8 +1,12 @@
 """GeoSphere Austria Plus – Custom Integration mit Conditions & Forecast."""
 from __future__ import annotations
 
+import logging
+
 from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
 from homeassistant.core import HomeAssistant
+
+_LOGGER = logging.getLogger(__name__)
 
 from .const import (
     DOMAIN,
@@ -14,12 +18,14 @@ from .const import (
     DATA_CURRENT,
     DATA_FORECASTS,
     DATA_WARNINGS,
+    DATA_AIR_QUALITY,
     DEFAULT_FORECAST_MODEL,
 )
 from .coordinator import (
     GeoSphereCurrentCoordinator,
     GeoSphereForecastCoordinator,
     GeoSphereWarningsCoordinator,
+    GeoSphereAirQualityCoordinator,
 )
 
 PLATFORMS = ["weather", "sensor"]
@@ -73,10 +79,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             err,
         )
 
+    aq_coordinator = GeoSphereAirQualityCoordinator(hass, lat, lon)
+    try:
+        await aq_coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady as err:
+        # Schadstoff-API ist optional – Integration läuft auch ohne Luftqualitätsdaten
+        _LOGGER.warning(
+            "Schadstoff-API nicht erreichbar: %s – Integration läuft ohne Luftqualitätsdaten weiter",
+            err,
+        )
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_CURRENT: current_coordinator,
         DATA_FORECASTS: forecast_coordinators,
         DATA_WARNINGS: warnings_coordinator,
+        DATA_AIR_QUALITY: aq_coordinator,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

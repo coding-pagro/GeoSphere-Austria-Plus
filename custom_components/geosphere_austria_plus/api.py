@@ -19,6 +19,8 @@ from .const import (
     ENSEMBLE_PARAMS,
     ENSEMBLE_PARAM_MAP,
     WARNINGS_API_BASE,
+    CHEM_RESOURCE,
+    CHEM_PARAMS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -360,6 +362,43 @@ class GeoSphereApi:
                 "effects": w.get("auswirkungen", ""),
                 "recommendations": w.get("empfehlungen", ""),
             })
+        return result
+
+    # ------------------------------------------------------------------
+    # Schadstoffvorhersage (chem-v2-1h-3km)
+    # ------------------------------------------------------------------
+
+    async def get_air_quality(
+        self,
+        lat: float,
+        lon: float,
+    ) -> dict[str, Any]:
+        """
+        Stündliche Schadstoffvorhersage für einen Koordinatenpunkt abrufen.
+        Gibt ein Dict zurück: {'timestamps': [...], 'no2surf': [...], 'o3surf': [...], ...}
+        """
+        url = (
+            f"{API_BASE}/timeseries/forecast/{CHEM_RESOURCE}"
+            f"?parameters={CHEM_PARAMS}&lat_lon={lat},{lon}"
+        )
+        try:
+            async with self._session.get(url, timeout=TIMEOUT) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise GeoSphereApiError(
+                f"Fehler beim Abrufen der Schadstoffvorhersage: {err}"
+            ) from err
+
+        timestamps: list[str] = data.get("timestamps", [])
+        features = data.get("features", [])
+        if not features:
+            return {"timestamps": timestamps}
+
+        props = features[0].get("properties", {}).get("parameters", {})
+        result: dict[str, Any] = {"timestamps": timestamps}
+        for param, info in props.items():
+            result[param] = info.get("data", [])
         return result
 
     async def get_station_name(self, station_id: str) -> str:

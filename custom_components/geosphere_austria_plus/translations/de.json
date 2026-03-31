@@ -12,7 +12,12 @@
       "precipitation":    {"name": "Niederschlag"},
       "sunshine_duration":{"name": "Sonnenscheindauer"},
       "snow_height":      {"name": "Schneehöhe"},
-      "warning_level":    {"name": "Warnstufe"}
+      "warning_level":    {"name": "Warnstufe"},
+      "no2":              {"name": "Stickstoffdioxid"},
+      "o3":               {"name": "Ozon"},
+      "pm10":             {"name": "PM10"},
+      "pm25":             {"name": "PM2,5"},
+      "aqi":              {"name": "Luftqualitätsindex"}
     }
   },
   "options": {

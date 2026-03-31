@@ -77,6 +77,10 @@ class _MockSensorDeviceClass:
     WIND_SPEED = "wind_speed"
     PRECIPITATION = "precipitation"
     DURATION = "duration"
+    NITROGEN_DIOXIDE = "nitrogen_dioxide"
+    OZONE = "ozone"
+    PM10 = "pm10"
+    PM25 = "pm25"
 
 
 class _MockSensorStateClass:
@@ -118,6 +122,7 @@ _const_mod.UnitOfTemperature.CELSIUS = "°C"
 _const_mod.UnitOfPressure.HPA = "hPa"
 _const_mod.UnitOfSpeed.METERS_PER_SECOND = "m/s"
 _const_mod.UnitOfLength.MILLIMETERS = "mm"
+_const_mod.CONCENTRATION_MICROGRAMS_PER_CUBIC_METER = "µg/m³"
 
 class _MockDeviceInfo(dict):
     """Minimal stand-in for DeviceInfo (TypedDict subclass in HA)."""

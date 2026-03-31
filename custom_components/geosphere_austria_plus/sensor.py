@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     DEGREE,
     PERCENTAGE,
     UnitOfLength,
@@ -34,9 +35,15 @@ from .const import (
     CONF_STATION_NAME,
     DATA_CURRENT,
     DATA_WARNINGS,
+    DATA_AIR_QUALITY,
     WARNING_TYPES,
+    AQI_BREAKPOINTS,
 )
-from .coordinator import GeoSphereCurrentCoordinator, GeoSphereWarningsCoordinator
+from .coordinator import (
+    GeoSphereCurrentCoordinator,
+    GeoSphereWarningsCoordinator,
+    GeoSphereAirQualityCoordinator,
+)
 
 
 @dataclass(frozen=True)
@@ -126,12 +133,69 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class AirQualitySensorDescription(SensorEntityDescription):
+    """SensorEntityDescription für Schadstoff-Sensoren."""
+    param: str = ""
+
+
+AIR_QUALITY_SENSORS: tuple[AirQualitySensorDescription, ...] = (
+    AirQualitySensorDescription(
+        key="no2",            translation_key="no2",
+        param="no2surf",
+        native_unit_of_measurement=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        device_class=SensorDeviceClass.NITROGEN_DIOXIDE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:molecule",
+    ),
+    AirQualitySensorDescription(
+        key="o3",             translation_key="o3",
+        param="o3surf",
+        native_unit_of_measurement=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        device_class=SensorDeviceClass.OZONE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:sun-wireless",
+    ),
+    AirQualitySensorDescription(
+        key="pm10",           translation_key="pm10",
+        param="pm10surf",
+        native_unit_of_measurement=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        device_class=SensorDeviceClass.PM10,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:air-filter",
+    ),
+    AirQualitySensorDescription(
+        key="pm25",           translation_key="pm25",
+        param="pm25surf",
+        native_unit_of_measurement=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        device_class=SensorDeviceClass.PM25,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:air-filter",
+    ),
+)
+
+_AQI_ATTR_KEY: dict[str, str] = {
+    "no2surf":  "no2_index",
+    "o3surf":   "o3_index",
+    "pm10surf": "pm10_index",
+    "pm25surf": "pm25_index",
+}
+
+
+def _compute_aqi_level(value: float, param: str) -> int:
+    """EU-Luftqualitätsstufe (1–6) für einen einzelnen Schadstoff berechnen."""
+    for i, threshold in enumerate(AQI_BREAKPOINTS[param]):
+        if value < threshold:
+            return i + 1
+    return 6
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """TAWES-Sensoren und Warnungs-Sensor registrieren."""
+    """TAWES-Sensoren, Warnungs-Sensor und Luftqualitäts-Sensoren registrieren."""
     coordinators = hass.data[DOMAIN][entry.entry_id]
     station_id = entry.data[CONF_STATION_ID]
     station_name = entry.data.get(CONF_STATION_NAME, station_id)
@@ -145,6 +209,16 @@ async def async_setup_entry(
     if warnings_coordinator is not None:
         entities.append(
             GeoSphereWarningSensor(warnings_coordinator, station_id, station_name)
+        )
+
+    aq_coordinator = coordinators.get(DATA_AIR_QUALITY)
+    if aq_coordinator is not None:
+        for description in AIR_QUALITY_SENSORS:
+            entities.append(
+                AirQualitySensor(aq_coordinator, description, station_id, station_name)
+            )
+        entities.append(
+            AirQualityIndexSensor(aq_coordinator, station_id, station_name)
         )
 
     async_add_entities(entities)
@@ -250,3 +324,117 @@ class GeoSphereWarningSensor(
                 entry["recommendations"] = w["recommendations"]
             result.append(entry)
         return {"warnings": result}
+
+
+class AirQualitySensor(
+    CoordinatorEntity[GeoSphereAirQualityCoordinator], SensorEntity
+):
+    """Stündlicher Schadstoffwert (erste Vorhersagestunde) als HA-Sensor."""
+
+    _attr_has_entity_name = True
+    _attr_attribution = ATTRIBUTION
+
+    def __init__(
+        self,
+        coordinator: GeoSphereAirQualityCoordinator,
+        description: AirQualitySensorDescription,
+        station_id: str,
+        station_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"geosphere_plus_{station_id}_aq_{description.param}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, station_id)},
+            name=station_name,
+            manufacturer="Data provided by GeoSphere Austria",
+            model=station_name,
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://dataset.api.hub.geosphere.at/v1",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Wert der ersten Vorhersagestunde (gerundet auf 1 Dezimalstelle)."""
+        data = self.coordinator.data
+        if not data:
+            return None
+        values = data.get(self.entity_description.param)
+        if not values:
+            return None
+        return round(values[0], 1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """24-Stunden-Vorhersage als Liste von {time, value}-Dicts."""
+        data = self.coordinator.data or {}
+        timestamps: list[str] = data.get("timestamps", [])
+        values: list = data.get(self.entity_description.param, [])
+        forecast = [
+            {"time": ts, "value": round(v, 1)}
+            for ts, v in zip(timestamps[:24], values[:24])
+            if v is not None
+        ]
+        return {"forecast": forecast}
+
+
+class AirQualityIndexSensor(
+    CoordinatorEntity[GeoSphereAirQualityCoordinator], SensorEntity
+):
+    """EU-Luftqualitätsindex (1–6) aggregiert aus NO₂, O₃, PM10 und PM2.5."""
+
+    _attr_has_entity_name = True
+    _attr_attribution = ATTRIBUTION
+    _attr_translation_key = "aqi"
+
+    def __init__(
+        self,
+        coordinator: GeoSphereAirQualityCoordinator,
+        station_id: str,
+        station_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"geosphere_plus_{station_id}_aqi"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, station_id)},
+            name=station_name,
+            manufacturer="Data provided by GeoSphere Austria",
+            model=station_name,
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://dataset.api.hub.geosphere.at/v1",
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Höchster EU-Luftqualitätsindex aller Schadstoffe (1=Gut, 6=Extrem schlecht)."""
+        data = self.coordinator.data
+        if not data:
+            return None
+        indices = []
+        for param in AQI_BREAKPOINTS:
+            values = data.get(param)
+            if values:
+                indices.append(_compute_aqi_level(values[0], param))
+        return max(indices) if indices else None
+
+    @property
+    def icon(self) -> str:
+        level = self.native_value or 1
+        if level <= 2:
+            return "mdi:leaf"
+        if level == 3:
+            return "mdi:alert-circle-outline"
+        if level == 4:
+            return "mdi:alert-circle"
+        return "mdi:biohazard"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """EU-Luftqualitätsstufe je Schadstoff."""
+        data = self.coordinator.data or {}
+        attrs: dict[str, Any] = {}
+        for param, attr_key in _AQI_ATTR_KEY.items():
+            values = data.get(param)
+            if values:
+                attrs[attr_key] = _compute_aqi_level(values[0], param)
+        return attrs

@@ -15,6 +15,7 @@ from .const import (
     CURRENT_UPDATE_INTERVAL,
     FORECAST_UPDATE_INTERVAL,
     WARNINGS_UPDATE_INTERVAL,
+    AIR_QUALITY_UPDATE_INTERVAL,
     DEFAULT_FORECAST_MODEL,
 )
 
@@ -100,3 +101,30 @@ class GeoSphereWarningsCoordinator(DataUpdateCoordinator[list[dict[str, Any]]]):
             return await self._api.get_warnings(self.lat, self.lon)
         except GeoSphereApiError as err:
             raise UpdateFailed(f"Warnungs-API Fehler: {err}") from err
+
+
+class GeoSphereAirQualityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Koordinator für die stündliche Schadstoffvorhersage (chem-v2-1h-3km)."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        lat: float,
+        lon: float,
+    ) -> None:
+        self.lat = lat
+        self.lon = lon
+        self._api = GeoSphereApi(async_get_clientsession(hass))
+
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_air_quality_{lat}_{lon}",
+            update_interval=timedelta(minutes=AIR_QUALITY_UPDATE_INTERVAL),
+        )
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        try:
+            return await self._api.get_air_quality(self.lat, self.lon)
+        except GeoSphereApiError as err:
+            raise UpdateFailed(f"Schadstoff-API Fehler: {err}") from err
