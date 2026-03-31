@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -233,7 +233,7 @@ async def async_setup_entry(
 
     # Aktive unique_ids für spätere Cleanup-Logik registrieren
     coordinators.setdefault("_active_unique_ids", set()).update(
-        e._attr_unique_id for e in entities
+        e.unique_id for e in entities
     )
 
     async_add_entities(entities)
@@ -258,8 +258,8 @@ class TawesSensor(CoordinatorEntity[GeoSphereCurrentCoordinator], SensorEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name=location_name,
-            manufacturer="Data provided by GeoSphere Austria",
-            model=location_name,
+            manufacturer="GeoSphere Austria",
+            model="DataHub API v1",
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
@@ -291,8 +291,8 @@ class GeoSphereWarningSensor(
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name=location_name,
-            manufacturer="Data provided by GeoSphere Austria",
-            model=location_name,
+            manufacturer="GeoSphere Austria",
+            model="DataHub API v1",
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
@@ -362,32 +362,48 @@ class AirQualitySensor(
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name=location_name,
-            manufacturer="Data provided by GeoSphere Austria",
-            model=location_name,
+            manufacturer="GeoSphere Austria",
+            model="DataHub API v1",
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
 
+    def _current_index(self) -> int:
+        """Index des ersten aktuellen/zukünftigen Vorhersagepunkts."""
+        timestamps: list[str] = (self.coordinator.data or {}).get("timestamps", [])
+        now = datetime.now(timezone.utc)
+        for i, ts_str in enumerate(timestamps):
+            try:
+                dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if dt >= now - timedelta(hours=1):
+                return i
+        return 0
+
     @property
     def native_value(self) -> float | None:
-        """Wert der ersten Vorhersagestunde (gerundet auf 1 Dezimalstelle)."""
+        """Wert der aktuellen Vorhersagestunde (gerundet auf 1 Dezimalstelle)."""
         data = self.coordinator.data
         if not data:
             return None
         values = data.get(self.entity_description.param)
         if not values:
             return None
-        return round(values[0], 1)
+        idx = self._current_index()
+        v = values[idx] if idx < len(values) else values[0]
+        return round(v, 1) if v is not None else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """24-Stunden-Vorhersage als Liste von {time, value}-Dicts."""
+        """24-Stunden-Vorhersage ab aktueller Stunde als Liste von {time, value}-Dicts."""
         data = self.coordinator.data or {}
         timestamps: list[str] = data.get("timestamps", [])
         values: list = data.get(self.entity_description.param, [])
+        start = self._current_index()
         forecast = [
             {"time": ts, "value": round(v, 1)}
-            for ts, v in zip(timestamps[:24], values[:24])
+            for ts, v in zip(timestamps[start:start + 24], values[start:start + 24])
             if v is not None
         ]
         return {"forecast": forecast}
@@ -413,8 +429,8 @@ class AirQualityIndexSensor(
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name=location_name,
-            manufacturer="Data provided by GeoSphere Austria",
-            model=location_name,
+            manufacturer="GeoSphere Austria",
+            model="DataHub API v1",
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )

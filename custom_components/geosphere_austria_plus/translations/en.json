@@ -49,10 +49,6 @@
         }
       }
     },
-    "error": {
-      "invalid_station": "The specified station ID is invalid or unreachable.",
-      "cannot_connect": "Could not load the station list. Please check your internet connection and try again."
-    },
     "abort": {
       "already_configured": "A location with these coordinates is already configured."
     }

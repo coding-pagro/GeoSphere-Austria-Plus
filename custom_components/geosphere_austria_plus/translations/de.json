@@ -49,10 +49,6 @@
         }
       }
     },
-    "error": {
-      "invalid_station": "Die angegebene Stations-ID ist ungültig oder nicht erreichbar.",
-      "cannot_connect": "Die Stationsliste konnte nicht geladen werden. Bitte Internetverbindung prüfen und erneut versuchen."
-    },
     "abort": {
       "already_configured": "Ein Standort mit diesen Koordinaten ist bereits eingerichtet."
     }

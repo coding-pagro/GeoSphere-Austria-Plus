@@ -7,8 +7,6 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-_LOGGER = logging.getLogger(__name__)
-
 from .const import (
     DOMAIN,
     CONF_NAME,
@@ -29,6 +27,8 @@ from .coordinator import (
     GeoSphereWarningsCoordinator,
     GeoSphereAirQualityCoordinator,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["weather", "sensor"]
 
@@ -81,6 +81,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
     # Vorhersage-Koordinatoren (immer, basierend auf konfigurierten Koordinaten)
+    # ConfigEntryNotReady propagiert hier bewusst – Forecasts sind Kernfunktionalität
     for model in models:
         fc = GeoSphereForecastCoordinator(hass, lat, lon, model)
         await fc.async_config_entry_first_refresh()

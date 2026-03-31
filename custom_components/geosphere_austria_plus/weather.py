@@ -37,7 +37,6 @@ from .const import (
     DATA_FORECASTS,
     DEFAULT_FORECAST_MODEL,
     FORECAST_MODEL_LABELS,
-    nwp_to_condition,
 )
 from .coordinator import GeoSphereCurrentCoordinator, GeoSphereForecastCoordinator
 
@@ -51,6 +50,40 @@ _FOG_VISIBILITY_HUM = 97       # RF > 97 % → potentiell Nebel
 _WIND_STRONG_MS = 10.0         # FF > 10 m/s → windig
 _CLOUD_FULL = 0.875            # Als bewölkt gilt > 87.5 % SO-Ausfall
 _SUN_SECONDS_MAX = 600         # SO max. 600 s Sonnenschein je 10-Minuten-Intervall
+
+
+def nwp_to_condition(
+    tcc: float | None,
+    rain_mm: float,
+    snow_mm: float,
+    wind_ms: float,
+    is_day: bool,
+) -> str | None:
+    """Leite HA-Wetterbedingung aus NWP-Parametern ab."""
+    if snow_mm > 0.1 and rain_mm > 0.1:
+        return "snowy-rainy"
+    if snow_mm > 0.1:
+        return "snowy"
+    if rain_mm > 5.0:
+        return "pouring"
+    if rain_mm > 0.1:
+        return "rainy"
+    if tcc is None:
+        # Wolkenbedeckung nicht verfügbar (z. B. Nowcast) – kein Sonnenschein annehmen
+        if wind_ms > 10:
+            return "windy"
+        return None
+    if tcc > 0.875:
+        return "cloudy"
+    if tcc > 0.5:
+        if wind_ms > 10:
+            return "windy-variant"
+        return "partlycloudy"
+    if wind_ms > 10:
+        return "windy"
+    if is_day:
+        return "sunny"
+    return "clear-night"
 
 
 async def async_setup_entry(
@@ -95,7 +128,7 @@ async def async_setup_entry(
 
     # Aktive unique_ids für spätere Cleanup-Logik registrieren
     coordinators.setdefault("_active_unique_ids", set()).update(
-        e._attr_unique_id for e in entities
+        e.unique_id for e in entities
     )
 
     async_add_entities(entities)
@@ -139,8 +172,8 @@ class GeoSphereWeatherEntity(
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name=location_name,
-            manufacturer="Data provided by GeoSphere Austria",
-            model=location_name,
+            manufacturer="GeoSphere Austria",
+            model="DataHub API v1",
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )

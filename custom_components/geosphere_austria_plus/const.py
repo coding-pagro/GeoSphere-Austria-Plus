@@ -96,31 +96,3 @@ ENSEMBLE_PARAM_MAP = {
     "cape_p50":   "cape",
 }
 
-# NWP → HA-Condition Mapping (über Wolkenbedeckung + Niederschlag)
-# tcc = total cloud cover [0–1], rain_acc [mm], snow_acc [mm]
-def nwp_to_condition(tcc: float | None, rain_mm: float, snow_mm: float, wind_ms: float, is_day: bool) -> str | None:
-    """Leite HA-Wetterbedingung aus NWP-Parametern ab."""
-    if snow_mm > 0.1 and rain_mm > 0.1:
-        return "snowy-rainy"
-    if snow_mm > 0.1:
-        return "snowy"
-    if rain_mm > 5.0:
-        return "pouring"
-    if rain_mm > 0.1:
-        return "rainy"
-    if tcc is None:
-        # Wolkenbedeckung nicht verfügbar (z. B. Nowcast) – kein Sonnenschein annehmen
-        if wind_ms > 10:
-            return "windy"
-        return None
-    if tcc > 0.875:
-        return "cloudy"
-    if tcc > 0.5:
-        if wind_ms > 10:
-            return "windy-variant"
-        return "partlycloudy"
-    if wind_ms > 10:
-        return "windy"
-    if is_day:
-        return "sunny"
-    return "clear-night"
