@@ -13,6 +13,26 @@ CONF_LONGITUDE = "lon"
 # Keys für hass.data
 DATA_CURRENT = "current"
 DATA_FORECASTS = "forecasts"
+DATA_WARNINGS = "warnings"
+
+# Warnungstypen (warntypid → Name)
+WARNING_TYPES: dict[int, str] = {
+    1: "Sturm",
+    2: "Regen",
+    3: "Schnee",
+    4: "Glatteeis",
+    5: "Gewitter",
+    6: "Hitze",
+    7: "Kälte",
+}
+
+# Warnstufen (warnstufeid → Name)
+WARNING_LEVELS: dict[int, str] = {
+    0: "keine",
+    1: "gelb",
+    2: "orange",
+    3: "rot",
+}
 
 # Attribution
 ATTRIBUTION = "Data provided by GeoSphere Austria"
@@ -20,9 +40,11 @@ ATTRIBUTION = "Data provided by GeoSphere Austria"
 # Update-Intervalle
 CURRENT_UPDATE_INTERVAL = 10   # Minuten
 FORECAST_UPDATE_INTERVAL = 60  # Minuten
+WARNINGS_UPDATE_INTERVAL = 15  # Minuten
 
 # GeoSphere API
 API_BASE = "https://dataset.api.hub.geosphere.at/v1"
+WARNINGS_API_BASE = "https://warnungen.zamg.at/wsapp/api"
 
 # Aktuelle Messwerte (TAWES – 10-Minuten-Auflösung)
 TAWES_RESOURCE = "tawes-v1-10min"

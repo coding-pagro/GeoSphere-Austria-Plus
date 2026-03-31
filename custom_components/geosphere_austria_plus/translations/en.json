@@ -11,7 +11,8 @@
       "pressure_reduced": {"name": "Pressure (Reduced)"},
       "precipitation":    {"name": "Precipitation"},
       "sunshine_duration":{"name": "Sunshine Duration"},
-      "snow_height":      {"name": "Snow Height"}
+      "snow_height":      {"name": "Snow Height"},
+      "warning_level":    {"name": "Warning Level"}
     }
   },
   "options": {

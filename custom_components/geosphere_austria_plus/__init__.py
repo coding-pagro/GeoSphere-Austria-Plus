@@ -13,9 +13,14 @@ from .const import (
     CONF_LONGITUDE,
     DATA_CURRENT,
     DATA_FORECASTS,
+    DATA_WARNINGS,
     DEFAULT_FORECAST_MODEL,
 )
-from .coordinator import GeoSphereCurrentCoordinator, GeoSphereForecastCoordinator
+from .coordinator import (
+    GeoSphereCurrentCoordinator,
+    GeoSphereForecastCoordinator,
+    GeoSphereWarningsCoordinator,
+)
 
 PLATFORMS = ["weather", "sensor"]
 
@@ -58,9 +63,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await fc.async_config_entry_first_refresh()
         forecast_coordinators[model] = fc
 
+    warnings_coordinator = GeoSphereWarningsCoordinator(hass, lat, lon)
+    try:
+        await warnings_coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady as err:
+        # Warnungs-API ist optional – Integration läuft auch ohne Warnungen
+        _LOGGER.warning(
+            "Warnungs-API nicht erreichbar: %s – Integration läuft ohne Warnungen weiter",
+            err,
+        )
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_CURRENT: current_coordinator,
         DATA_FORECASTS: forecast_coordinators,
+        DATA_WARNINGS: warnings_coordinator,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

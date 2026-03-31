@@ -11,7 +11,15 @@ from urllib.parse import quote
 
 import aiohttp
 
-from .const import API_BASE, TAWES_RESOURCE, TAWES_PARAMS, NWP_PARAMS, ENSEMBLE_PARAMS, ENSEMBLE_PARAM_MAP
+from .const import (
+    API_BASE,
+    TAWES_RESOURCE,
+    TAWES_PARAMS,
+    NWP_PARAMS,
+    ENSEMBLE_PARAMS,
+    ENSEMBLE_PARAM_MAP,
+    WARNINGS_API_BASE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -309,6 +317,50 @@ class GeoSphereApi:
     # ------------------------------------------------------------------
     # Hilfsmethoden
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Wetterwarnungen
+    # ------------------------------------------------------------------
+
+    async def get_warnings(
+        self,
+        lat: float,
+        lon: float,
+        lang: str = "de",
+    ) -> list[dict[str, Any]]:
+        """
+        Aktive Wetterwarnungen für einen Koordinatenpunkt abrufen.
+        Gibt eine Liste normalisierter Warnungs-Dicts zurück.
+        """
+        url = (
+            f"{WARNINGS_API_BASE}/getWarningsForCoords"
+            f"?lon={lon}&lat={lat}&lang={lang}"
+        )
+        try:
+            async with self._session.get(url, timeout=TIMEOUT) as resp:
+                resp.raise_for_status()
+                # content_type=None: API liefert teils abweichende MIME-Types
+                data = await resp.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise GeoSphereApiError(f"Fehler beim Abrufen der Warnungen: {err}") from err
+
+        raw_warnings = data.get("properties", {}).get("warnings", [])
+        result: list[dict[str, Any]] = []
+        for w in raw_warnings:
+            raw = w.get("rawinfo", {})
+            begin_ts = raw.get("start")
+            end_ts = raw.get("end")
+            result.append({
+                "id": w.get("warnid"),
+                "type_id": w.get("warntypid"),
+                "level": w.get("warnstufeid", 0),
+                "begin": int(begin_ts) if begin_ts is not None else None,
+                "end": int(end_ts) if end_ts is not None else None,
+                "text": w.get("text", ""),
+                "effects": w.get("auswirkungen", ""),
+                "recommendations": w.get("empfehlungen", ""),
+            })
+        return result
 
     async def get_station_name(self, station_id: str) -> str:
         """Gibt den Stationsnamen aus dem Metadaten-Endpunkt zurück."""

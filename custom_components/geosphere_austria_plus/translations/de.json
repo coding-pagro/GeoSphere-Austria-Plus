@@ -11,7 +11,8 @@
       "pressure_reduced": {"name": "Luftdruck (reduziert)"},
       "precipitation":    {"name": "Niederschlag"},
       "sunshine_duration":{"name": "Sonnenscheindauer"},
-      "snow_height":      {"name": "Schneehöhe"}
+      "snow_height":      {"name": "Schneehöhe"},
+      "warning_level":    {"name": "Warnstufe"}
     }
   },
   "options": {
