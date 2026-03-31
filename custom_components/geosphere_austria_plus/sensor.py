@@ -31,6 +31,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTRIBUTION,
     DOMAIN,
+    CONF_NAME,
     CONF_STATION_ID,
     CONF_STATION_NAME,
     DATA_CURRENT,
@@ -197,29 +198,43 @@ async def async_setup_entry(
 ) -> None:
     """TAWES-Sensoren, Warnungs-Sensor und Luftqualitäts-Sensoren registrieren."""
     coordinators = hass.data[DOMAIN][entry.entry_id]
-    station_id = entry.data[CONF_STATION_ID]
-    station_name = entry.data.get(CONF_STATION_NAME, station_id)
+    entry_id = entry.entry_id
+    location_name = (
+        entry.options.get(CONF_NAME)
+        or entry.data.get(CONF_NAME)
+        or entry.title
+    )
 
-    entities: list[SensorEntity] = [
-        TawesSensor(coordinators[DATA_CURRENT], description, station_id, station_name)
-        for description in SENSORS
-    ]
+    entities: list[SensorEntity] = []
+
+    # TAWES-Sensoren nur wenn Station konfiguriert und erreichbar
+    current_coordinator = coordinators.get(DATA_CURRENT)
+    if current_coordinator is not None:
+        entities += [
+            TawesSensor(current_coordinator, description, entry_id, location_name)
+            for description in SENSORS
+        ]
 
     warnings_coordinator = coordinators.get(DATA_WARNINGS)
     if warnings_coordinator is not None:
         entities.append(
-            GeoSphereWarningSensor(warnings_coordinator, station_id, station_name)
+            GeoSphereWarningSensor(warnings_coordinator, entry_id, location_name)
         )
 
     aq_coordinator = coordinators.get(DATA_AIR_QUALITY)
     if aq_coordinator is not None:
         for description in AIR_QUALITY_SENSORS:
             entities.append(
-                AirQualitySensor(aq_coordinator, description, station_id, station_name)
+                AirQualitySensor(aq_coordinator, description, entry_id, location_name)
             )
         entities.append(
-            AirQualityIndexSensor(aq_coordinator, station_id, station_name)
+            AirQualityIndexSensor(aq_coordinator, entry_id, location_name)
         )
+
+    # Aktive unique_ids für spätere Cleanup-Logik registrieren
+    coordinators.setdefault("_active_unique_ids", set()).update(
+        e._attr_unique_id for e in entities
+    )
 
     async_add_entities(entities)
 
@@ -234,17 +249,17 @@ class TawesSensor(CoordinatorEntity[GeoSphereCurrentCoordinator], SensorEntity):
         self,
         coordinator: GeoSphereCurrentCoordinator,
         description: TawesSensorDescription,
-        station_id: str,
-        station_name: str,
+        entry_id: str,
+        location_name: str,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
-        self._attr_unique_id = f"geosphere_plus_{station_id}_{description.key}"
+        self._attr_unique_id = f"geosphere_plus_{entry_id}_{description.key}"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, station_id)},
-            name=station_name,
+            identifiers={(DOMAIN, entry_id)},
+            name=location_name,
             manufacturer="Data provided by GeoSphere Austria",
-            model=station_name,
+            model=location_name,
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
@@ -268,16 +283,16 @@ class GeoSphereWarningSensor(
     def __init__(
         self,
         coordinator: GeoSphereWarningsCoordinator,
-        station_id: str,
-        station_name: str,
+        entry_id: str,
+        location_name: str,
     ) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"geosphere_plus_{station_id}_warning_level"
+        self._attr_unique_id = f"geosphere_plus_{entry_id}_warning_level"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, station_id)},
-            name=station_name,
+            identifiers={(DOMAIN, entry_id)},
+            name=location_name,
             manufacturer="Data provided by GeoSphere Austria",
-            model=station_name,
+            model=location_name,
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
@@ -338,17 +353,17 @@ class AirQualitySensor(
         self,
         coordinator: GeoSphereAirQualityCoordinator,
         description: AirQualitySensorDescription,
-        station_id: str,
-        station_name: str,
+        entry_id: str,
+        location_name: str,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
-        self._attr_unique_id = f"geosphere_plus_{station_id}_aq_{description.param}"
+        self._attr_unique_id = f"geosphere_plus_{entry_id}_aq_{description.param}"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, station_id)},
-            name=station_name,
+            identifiers={(DOMAIN, entry_id)},
+            name=location_name,
             manufacturer="Data provided by GeoSphere Austria",
-            model=station_name,
+            model=location_name,
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
@@ -390,16 +405,16 @@ class AirQualityIndexSensor(
     def __init__(
         self,
         coordinator: GeoSphereAirQualityCoordinator,
-        station_id: str,
-        station_name: str,
+        entry_id: str,
+        location_name: str,
     ) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"geosphere_plus_{station_id}_aqi"
+        self._attr_unique_id = f"geosphere_plus_{entry_id}_aqi"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, station_id)},
-            name=station_name,
+            identifiers={(DOMAIN, entry_id)},
+            name=location_name,
             manufacturer="Data provided by GeoSphere Austria",
-            model=station_name,
+            model=location_name,
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )

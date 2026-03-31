@@ -3,6 +3,7 @@ from __future__ import annotations
 
 DOMAIN = "geosphere_austria_plus"
 DEFAULT_NAME = "GeoSphere Austria Plus"
+CONF_NAME = "name"
 CONF_STATION_ID = "station_id"
 CONF_FORECAST_MODEL = "forecast_model"    # veraltet, nur noch für Rückwärtskompatibilität
 CONF_FORECAST_MODELS = "forecast_models"  # Liste der gewählten Modelle

@@ -64,16 +64,16 @@ def _make_aq_sensor(param: str, data=None) -> AirQualitySensor:
     return AirQualitySensor(
         coordinator=_make_coordinator(data),
         description=description,
-        station_id="11035",
-        station_name="WIEN HOHE WARTE",
+        entry_id="test_entry_id",
+        location_name="WIEN HOHE WARTE",
     )
 
 
 def _make_aqi_sensor(data=None) -> AirQualityIndexSensor:
     return AirQualityIndexSensor(
         coordinator=_make_coordinator(data),
-        station_id="11035",
-        station_name="WIEN HOHE WARTE",
+        entry_id="test_entry_id",
+        location_name="WIEN HOHE WARTE",
     )
 
 
@@ -395,11 +395,11 @@ class TestAirQualityIndexSensorAttributes:
 class TestAirQualitySensorMetadata:
     def test_unique_id_no2(self):
         sensor = _make_aq_sensor("no2surf")
-        assert sensor._attr_unique_id == "geosphere_plus_11035_aq_no2surf"
+        assert sensor._attr_unique_id == "geosphere_plus_test_entry_id_aq_no2surf"
 
     def test_unique_id_pm25(self):
         sensor = _make_aq_sensor("pm25surf")
-        assert sensor._attr_unique_id == "geosphere_plus_11035_aq_pm25surf"
+        assert sensor._attr_unique_id == "geosphere_plus_test_entry_id_aq_pm25surf"
 
     def test_translation_key_no2(self):
         sensor = _make_aq_sensor("no2surf")
@@ -411,11 +411,11 @@ class TestAirQualitySensorMetadata:
 
     def test_aqi_unique_id(self):
         sensor = _make_aqi_sensor()
-        assert sensor._attr_unique_id == "geosphere_plus_11035_aqi"
+        assert sensor._attr_unique_id == "geosphere_plus_test_entry_id_aqi"
 
     def test_device_info_identifiers(self):
         sensor = _make_aq_sensor("no2surf")
-        assert sensor._attr_device_info["identifiers"] == {("geosphere_austria_plus", "11035")}
+        assert sensor._attr_device_info["identifiers"] == {("geosphere_austria_plus", "test_entry_id")}
 
     def test_device_info_name(self):
         sensor = _make_aqi_sensor()

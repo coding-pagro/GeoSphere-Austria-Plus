@@ -168,6 +168,7 @@ class _MockOptionsFlow:
     """Minimal stand-in for config_entries.OptionsFlow."""
 
     def __init__(self):
+        self.hass = MagicMock()
         self.config_entry = MagicMock()
         self.config_entry.options = {}
         self.config_entry.data = {}
@@ -206,6 +207,7 @@ sys.modules.update(
         "homeassistant.helpers.entity_platform": MagicMock(),
         "homeassistant.helpers.update_coordinator": _coordinator_mod,
         "homeassistant.helpers.selector": MagicMock(),
+        "homeassistant.helpers.entity_registry": MagicMock(),
         "voluptuous": MagicMock(),
     }
 )

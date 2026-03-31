@@ -25,8 +25,8 @@ def _make_coordinator(warnings: list | None = None):
 def _make_sensor(warnings: list | None = None) -> GeoSphereWarningSensor:
     return GeoSphereWarningSensor(
         coordinator=_make_coordinator(warnings),
-        station_id="11035",
-        station_name="WIEN HOHE WARTE",
+        entry_id="test_entry_id",
+        location_name="WIEN HOHE WARTE",
     )
 
 
@@ -310,7 +310,7 @@ class TestWarningSensorAttributes:
 class TestWarningSensorMetadata:
     def test_unique_id(self):
         sensor = _make_sensor()
-        assert sensor._attr_unique_id == "geosphere_plus_11035_warning_level"
+        assert sensor._attr_unique_id == "geosphere_plus_test_entry_id_warning_level"
 
     def test_translation_key(self):
         sensor = _make_sensor()
@@ -318,7 +318,7 @@ class TestWarningSensorMetadata:
 
     def test_device_info_identifiers(self):
         sensor = _make_sensor()
-        assert sensor._attr_device_info["identifiers"] == {("geosphere_austria_plus", "11035")}
+        assert sensor._attr_device_info["identifiers"] == {("geosphere_austria_plus", "test_entry_id")}
 
     def test_device_info_name(self):
         sensor = _make_sensor()

@@ -28,10 +28,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTRIBUTION,
     DOMAIN,
-    CONF_STATION_ID,
+    CONF_NAME,
     CONF_FORECAST_MODEL,
     CONF_FORECAST_MODELS,
-    CONF_STATION_NAME,
+    CONF_LATITUDE,
+    CONF_LONGITUDE,
     DATA_CURRENT,
     DATA_FORECASTS,
     DEFAULT_FORECAST_MODEL,
@@ -59,8 +60,17 @@ async def async_setup_entry(
 ) -> None:
     """Eine Wetterentität pro gewähltem Modell registrieren."""
     coordinators = hass.data[DOMAIN][entry.entry_id]
-    station_id = entry.data[CONF_STATION_ID]
-    station_name = entry.data.get(CONF_STATION_NAME, station_id)
+    entry_id = entry.entry_id
+    location_name = (
+        entry.options.get(CONF_NAME)
+        or entry.data.get(CONF_NAME)
+        or entry.title
+    )
+    lon: float = (
+        entry.options[CONF_LONGITUDE]
+        if CONF_LONGITUDE in entry.options
+        else entry.data.get(CONF_LONGITUDE, 14.0)
+    )
 
     # Options haben Vorrang (OptionsFlow), dann Data, dann Rückwärtskompatibilität
     models: list[str] = (
@@ -69,25 +79,37 @@ async def async_setup_entry(
         or [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
     )
 
-    async_add_entities(
-        [
-            GeoSphereWeatherEntity(
-                current_coordinator=coordinators[DATA_CURRENT],
-                forecast_coordinator=coordinators[DATA_FORECASTS][model],
-                station_id=station_id,
-                model=model,
-                entry_id=entry.entry_id,
-                station_name=station_name,
-            )
-            for model in models
-        ]
+    current_coordinator: GeoSphereCurrentCoordinator | None = coordinators.get(DATA_CURRENT)
+
+    entities = [
+        GeoSphereWeatherEntity(
+            current_coordinator=current_coordinator,
+            forecast_coordinator=coordinators[DATA_FORECASTS][model],
+            entry_id=entry_id,
+            model=model,
+            location_name=location_name,
+            lon=lon,
+        )
+        for model in models
+    ]
+
+    # Aktive unique_ids für spätere Cleanup-Logik registrieren
+    coordinators.setdefault("_active_unique_ids", set()).update(
+        e._attr_unique_id for e in entities
     )
+
+    async_add_entities(entities)
 
 
 class GeoSphereWeatherEntity(
-    CoordinatorEntity[GeoSphereCurrentCoordinator], WeatherEntity
+    CoordinatorEntity[GeoSphereForecastCoordinator], WeatherEntity
 ):
-    """Wetter-Entität mit Conditions und stündlicher/täglicher Vorhersage."""
+    """Wetter-Entität mit Conditions und stündlicher/täglicher Vorhersage.
+
+    Der Forecast-Koordinator ist immer verfügbar (primär).
+    Der Current-Koordinator (TAWES-Station) ist optional — ohne ihn wird
+    der aktuelle Zustand aus dem ersten Vorhersagepunkt abgeleitet.
+    """
 
     _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
@@ -98,28 +120,27 @@ class GeoSphereWeatherEntity(
 
     def __init__(
         self,
-        current_coordinator: GeoSphereCurrentCoordinator,
+        current_coordinator: GeoSphereCurrentCoordinator | None,
         forecast_coordinator: GeoSphereForecastCoordinator,
-        station_id: str,
-        model: str,
         entry_id: str,
-        station_name: str | None = None,
+        model: str,
+        location_name: str,
+        lon: float = 14.0,
     ) -> None:
-        super().__init__(current_coordinator)
-        self._forecast_coordinator = forecast_coordinator
-        self._station_id = station_id
+        super().__init__(forecast_coordinator)
+        self._current_coordinator = current_coordinator
         self._model = model
-        self._attr_unique_id = f"geosphere_plus_{station_id}_{model}"
+        self._lon = lon
+        self._attr_unique_id = f"geosphere_plus_{entry_id}_{model}"
 
         model_label = FORECAST_MODEL_LABELS.get(model, model)
-        self._attr_name = model_label  # z.B. "NWP" unter Gerät "ST.POELTEN LANDHAUS"
+        self._attr_name = model_label
 
-        device_name = station_name or station_id
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, station_id)},
-            name=device_name,
+            identifiers={(DOMAIN, entry_id)},
+            name=location_name,
             manufacturer="Data provided by GeoSphere Austria",
-            model=device_name,
+            model=location_name,
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
@@ -137,14 +158,16 @@ class GeoSphereWeatherEntity(
 
     @property
     def _current(self) -> dict[str, Any]:
-        return self.coordinator.data or {}
+        if self._current_coordinator is None:
+            return {}
+        return self._current_coordinator.data or {}
 
     @property
     def _forecast_raw(self) -> list[dict[str, Any]]:
-        return self._forecast_coordinator.data or []
+        return self.coordinator.data or []
 
     # ------------------------------------------------------------------
-    # Aktuelle Werte
+    # Aktuelle Werte (aus TAWES wenn vorhanden, sonst None)
     # ------------------------------------------------------------------
 
     @property
@@ -181,11 +204,16 @@ class GeoSphereWeatherEntity(
         return self._current.get("RR")
 
     # ------------------------------------------------------------------
-    # Condition – aus Stationsmesswerten abgeleitet
+    # Condition – aus TAWES abgeleitet wenn vorhanden, sonst aus Forecast
     # ------------------------------------------------------------------
 
     @property
     def condition(self) -> str | None:
+        if self._current_coordinator is not None and self._current_coordinator.data:
+            return self._condition_from_tawes()
+        return self._condition_from_forecast()
+
+    def _condition_from_tawes(self) -> str | None:
         """
         Ableitung der HA-Wetterbedingung aus TAWES-Messwerten.
 
@@ -199,32 +227,22 @@ class GeoSphereWeatherEntity(
           7. Sonnig / Klare Nacht
         """
         d = self._current
-        rr = d.get("RR") or 0.0       # Niederschlag mm/10min
-        rf = d.get("RF") or 0.0       # Relative Luftfeuchtigkeit %
-        ff = d.get("FF") or 0.0       # Windgeschwindigkeit m/s
-        so = d.get("SO")              # Sonnenscheindauer Sekunden/10min (None = keine Daten)
-        sh = d.get("SH") or 0.0       # Schneehöhe cm
+        rr = d.get("RR") or 0.0
+        rf = d.get("RF") or 0.0
+        ff = d.get("FF") or 0.0
+        so = d.get("SO")
+        sh = d.get("SH") or 0.0
 
-        # Schnee + Regen kombiniert (vor reinen Regen-Checks prüfen, sonst nie erreichbar)
         if sh > _SNOW_THRESHOLD_CM and rr >= _RAIN_THRESHOLD_MM:
             return "snowy-rainy"
-
-        # Regen-Pegel
         if rr >= _HEAVY_RAIN_MM:
             return "pouring"
         if rr >= _RAIN_THRESHOLD_MM:
             return "rainy"
-
-        # Schnee
         if sh > _SNOW_THRESHOLD_CM:
             return "snowy"
-
-        # Nebel: sehr hohe Luftfeuchtigkeit ohne Wind
         if rf >= _FOG_VISIBILITY_HUM and ff < 2.0:
             return "fog"
-
-        # Bewölkung aus Sonnenscheindauer ableiten
-        # SO = Sekunden Sonnenschein in den letzten 10 Min (max 600 s)
         if so is not None:
             cloud_fraction = 1.0 - (so / _SUN_SECONDS_MAX)
             if cloud_fraction >= _CLOUD_FULL:
@@ -233,16 +251,35 @@ class GeoSphereWeatherEntity(
                 return "cloudy"
             if cloud_fraction >= 0.5:
                 return "partlycloudy"
-
-        # Windig
         if ff >= _WIND_STRONG_MS:
             return "windy"
-
-        # Tag/Nacht ermitteln
         is_day = self._is_daytime()
         if is_day:
             return "sunny"
         return "clear-night"
+
+    def _condition_from_forecast(self) -> str | None:
+        """Aktuellen Zustand aus dem ersten verfügbaren Vorhersagepunkt ableiten."""
+        now = datetime.now(timezone.utc)
+        for entry in self._forecast_raw:
+            ts_str = entry.get("datetime")
+            if not ts_str:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if dt < now - timedelta(hours=1):
+                continue
+            rain = entry.get("rain_acc") or 0.0
+            snow = entry.get("snow_acc") or 0.0
+            tcc = entry.get("tcc")
+            u10 = entry.get("u10m") or 0.0
+            v10 = entry.get("v10m") or 0.0
+            wind_speed = math.sqrt(u10**2 + v10**2)
+            is_day = self._is_daytime()
+            return nwp_to_condition(tcc, rain, snow, wind_speed, is_day)
+        return None
 
     def _is_daytime(self) -> bool:
         """Tag/Nacht aus sun.sun-Entity ableiten; Fallback auf Längengrad-Schätzung."""
@@ -251,10 +288,8 @@ class GeoSphereWeatherEntity(
             sun_state = hass.states.get("sun.sun")
             if sun_state is not None:
                 return sun_state.state == "above_horizon"
-        # Fallback: grobe Schätzung über UTC-Stunde + Längengrad-Offset
         now_utc = datetime.now(timezone.utc)
-        lon = self._current.get("_lon") or 14.0  # Österreich default
-        local_hour = (now_utc.hour + lon / 15.0) % 24
+        local_hour = (now_utc.hour + self._lon / 15.0) % 24
         return 6.0 <= local_hour < 21.0
 
     # ------------------------------------------------------------------
@@ -275,14 +310,13 @@ class GeoSphereWeatherEntity(
                 continue
 
             try:
-                # ISO 8601 mit Zeitzone
                 dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             except ValueError:
                 _LOGGER.debug("Ungültiger Zeitstempel: %s", ts_str)
                 continue
 
             if dt < now - timedelta(hours=1):
-                continue  # Vergangenheit überspringen
+                continue
 
             t2m = entry.get("t2m")
             rain = entry.get("rain_acc") or 0.0
@@ -290,14 +324,14 @@ class GeoSphereWeatherEntity(
             rh = entry.get("rh2m")
             u10 = entry.get("u10m") or 0.0
             v10 = entry.get("v10m") or 0.0
-            tcc = entry.get("tcc")  # None wenn Modell keinen Wolkenbedeckungswert liefert (z. B. Nowcast)
+            tcc = entry.get("tcc")
             wind_speed = math.sqrt(u10**2 + v10**2)
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
 
             is_day = self._is_dt_daytime(dt)
             cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day)
             if cond is None:
-                cond = self.condition  # Fallback: aktuelle Bedingung (z. B. wenn kein tcc vorhanden)
+                cond = self.condition
 
             forecasts.append(
                 Forecast(
@@ -312,7 +346,7 @@ class GeoSphereWeatherEntity(
                 )
             )
 
-        return forecasts[:48]  # max 48 Stunden
+        return forecasts[:48]
 
     # ------------------------------------------------------------------
     # Tägliche Vorhersage
@@ -351,8 +385,6 @@ class GeoSphereWeatherEntity(
 
             t_max = max(temps) if temps else None
             t_min = min(temps) if temps else None
-            # rain_acc/snow_acc sind akkumulierte Werte seit Modellstart →
-            # Tagesmenge = max − min der akkumulierten Werte im Tagesfenster
             rain_total = max(rain_list) - min(rain_list) if rain_list else 0.0
             snow_total = max(snow_list) - min(snow_list) if snow_list else 0.0
             tcc_avg = sum(tcc_list) / len(tcc_list) if tcc_list else None
@@ -362,8 +394,13 @@ class GeoSphereWeatherEntity(
             ]
             wind_max = max(wind_speeds) if wind_speeds else 0.0
 
-            # Dominante Bedingung: schlechteste Stunde des Tages
-            cond = nwp_to_condition(tcc_avg, rain_total / max(len(entries), 1), snow_total / max(len(entries), 1), wind_max, True)
+            cond = nwp_to_condition(
+                tcc_avg,
+                rain_total / max(len(entries), 1),
+                snow_total / max(len(entries), 1),
+                wind_max,
+                True,
+            )
             if rain_total > 2.0:
                 cond = "rainy"
             if rain_total > 10.0:
@@ -392,12 +429,12 @@ class GeoSphereWeatherEntity(
     # ------------------------------------------------------------------
 
     def _is_dt_daytime(self, dt: datetime) -> bool:
-        lon = self._current.get("_lon") or 14.0
-        local_hour = (dt.hour + lon / 15.0) % 24
+        local_hour = (dt.hour + self._lon / 15.0) % 24
         return 6.0 <= local_hour < 21.0
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        self.async_on_remove(
-            self._forecast_coordinator.async_add_listener(self.async_write_ha_state)
-        )
+        if self._current_coordinator is not None:
+            self.async_on_remove(
+                self._current_coordinator.async_add_listener(self.async_write_ha_state)
+            )

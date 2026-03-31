@@ -31,10 +31,10 @@ def entity(current_coord, forecast_coord):
     return GeoSphereWeatherEntity(
         current_coordinator=current_coord,
         forecast_coordinator=forecast_coord,
-        station_id="11035",
-        model="nwp-v1-1h-2500m",
         entry_id="test_entry",
-        station_name="WIEN HOHE WARTE",
+        model="nwp-v1-1h-2500m",
+        location_name="WIEN HOHE WARTE",
+        lon=16.37,
     )
 
 
@@ -65,7 +65,7 @@ def _future_entry(hours_ahead: int = 2, **overrides) -> dict:
 
 class TestEntityMetadata:
     def test_unique_id(self, entity):
-        assert entity._attr_unique_id == "geosphere_plus_11035_nwp-v1-1h-2500m"
+        assert entity._attr_unique_id == "geosphere_plus_test_entry_nwp-v1-1h-2500m"
 
     def test_name(self, entity):
         assert entity._attr_name == "NWP"  # Modell-Label als Entitätsname unter Gerät
@@ -73,7 +73,7 @@ class TestEntityMetadata:
     def test_device_info_set(self, entity):
         di = entity._attr_device_info
         assert di is not None
-        assert di["identifiers"] == {("geosphere_austria_plus", "11035")}
+        assert di["identifiers"] == {("geosphere_austria_plus", "test_entry")}
         assert di["name"] == "WIEN HOHE WARTE"
         assert di["manufacturer"] == "Data provided by GeoSphere Austria"
         assert di["entry_type"] == "service"
@@ -200,10 +200,13 @@ class TestConditionDerivation:
         cond = entity.condition
         assert cond in ("sunny", "clear-night")
 
-    def test_empty_data_returns_day_or_night(self, entity, current_coord):
+    def test_empty_tawes_data_falls_back_to_forecast(self, entity, current_coord, forecast_coord):
+        """Wenn TAWES-Daten leer sind, wird condition aus der Vorhersage abgeleitet.
+        Bei leerer Vorhersage ist das Ergebnis None."""
         current_coord.data = {}
+        forecast_coord.data = []
         cond = entity.condition
-        assert cond in ("sunny", "clear-night")
+        assert cond is None  # Kein TAWES, keine Vorhersage → kein Zustand ableitbar
 
 
 # ---------------------------------------------------------------------------
@@ -570,10 +573,10 @@ def _make_entity(model: str, current_coord, forecast_coord):
     return GeoSphereWeatherEntity(
         current_coordinator=current_coord,
         forecast_coordinator=forecast_coord,
-        station_id="11035",
-        model=model,
         entry_id="test_entry",
-        station_name="WIEN HOHE WARTE",
+        model=model,
+        location_name="WIEN HOHE WARTE",
+        lon=16.37,
     )
 
 

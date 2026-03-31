@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 from custom_components.geosphere_austria_plus.sensor import TawesSensor, SENSORS
 
 
-STATION_ID = "11035"
-STATION_NAME = "WIEN HOHE WARTE"
+ENTRY_ID = "abc123entryid"
+LOCATION_NAME = "WIEN HOHE WARTE"
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def coordinator():
 
 
 def _make_sensor(coordinator, description):
-    return TawesSensor(coordinator, description, STATION_ID, STATION_NAME)
+    return TawesSensor(coordinator, description, ENTRY_ID, LOCATION_NAME)
 
 
 # ---------------------------------------------------------------------------
@@ -65,16 +65,16 @@ class TestSensorMetadata:
     def test_unique_id(self, coordinator):
         desc = next(d for d in SENSORS if d.key == "temperature")
         sensor = _make_sensor(coordinator, desc)
-        assert sensor._attr_unique_id == f"geosphere_plus_{STATION_ID}_temperature"
+        assert sensor._attr_unique_id == f"geosphere_plus_{ENTRY_ID}_temperature"
 
     def test_device_info_identifiers(self, coordinator):
         sensor = _make_sensor(coordinator, SENSORS[0])
         di = sensor._attr_device_info
-        assert di["identifiers"] == {("geosphere_austria_plus", STATION_ID)}
+        assert di["identifiers"] == {("geosphere_austria_plus", ENTRY_ID)}
 
     def test_device_info_name(self, coordinator):
         sensor = _make_sensor(coordinator, SENSORS[0])
-        assert sensor._attr_device_info["name"] == STATION_NAME
+        assert sensor._attr_device_info["name"] == LOCATION_NAME
 
     def test_has_entity_name(self, coordinator):
         sensor = _make_sensor(coordinator, SENSORS[0])

@@ -24,7 +24,12 @@
     "step": {
       "init": {
         "title": "GeoSphere Austria Plus anpassen",
+        "description": "Standort, Station und Vorhersagemodelle ändern. Die TAWES-Station ist optional — nur auswählen, wenn Messwert-Sensoren gewünscht sind.",
         "data": {
+          "name": "Name",
+          "lat": "Breitengrad",
+          "lon": "Längengrad",
+          "station_id": "TAWES-Messstation (optional)",
           "forecast_models": "Vorhersagemodelle (1–3 wählen)"
         }
       }
@@ -34,9 +39,12 @@
     "step": {
       "user": {
         "title": "GeoSphere Austria Plus einrichten",
-        "description": "TAWES-Station und Vorhersagemodelle auswählen.",
+        "description": "Standort festlegen (Standard: HA-Heimstandort). Die TAWES-Station ist optional — nur auswählen, wenn Messwert-Sensoren gewünscht sind.",
         "data": {
-          "station_id": "TAWES-Station",
+          "name": "Name",
+          "lat": "Breitengrad",
+          "lon": "Längengrad",
+          "station_id": "TAWES-Messstation (optional)",
           "forecast_models": "Vorhersagemodelle (1–3 wählen)"
         }
       }
@@ -46,7 +54,7 @@
       "cannot_connect": "Die Stationsliste konnte nicht geladen werden. Bitte Internetverbindung prüfen und erneut versuchen."
     },
     "abort": {
-      "already_configured": "Diese Station ist bereits eingerichtet."
+      "already_configured": "Ein Standort mit diesen Koordinaten ist bereits eingerichtet."
     }
   }
 }

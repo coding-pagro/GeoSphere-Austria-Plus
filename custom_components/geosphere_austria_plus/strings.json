@@ -24,7 +24,12 @@
     "step": {
       "init": {
         "title": "Update GeoSphere Austria Plus",
+        "description": "Update location, station, and forecast models. The TAWES station is optional — only select one if you want real-time measurement sensors.",
         "data": {
+          "name": "Name",
+          "lat": "Latitude",
+          "lon": "Longitude",
+          "station_id": "TAWES Station (optional)",
           "forecast_models": "Forecast models (select 1–3)"
         }
       }
@@ -34,9 +39,12 @@
     "step": {
       "user": {
         "title": "Set up GeoSphere Austria Plus",
-        "description": "Select a TAWES station and forecast models.",
+        "description": "Configure your location. The TAWES station is optional — only select one if you want real-time measurement sensors.",
         "data": {
-          "station_id": "TAWES Station",
+          "name": "Name",
+          "lat": "Latitude",
+          "lon": "Longitude",
+          "station_id": "TAWES Station (optional)",
           "forecast_models": "Forecast models (select 1–3)"
         }
       }
@@ -46,7 +54,7 @@
       "cannot_connect": "Could not load the station list. Please check your internet connection and try again."
     },
     "abort": {
-      "already_configured": "This station is already configured."
+      "already_configured": "A location with these coordinates is already configured."
     }
   }
 }
