@@ -144,7 +144,7 @@ class GeoSphereWeatherEntity(
     der aktuelle Zustand aus dem ersten Vorhersagepunkt abgeleitet.
     """
 
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False
     _attr_attribution = ATTRIBUTION
     _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_native_pressure_unit = UnitOfPressure.HPA
@@ -167,7 +167,7 @@ class GeoSphereWeatherEntity(
         self._attr_unique_id = f"geosphere_plus_{entry_id}_{model}"
 
         model_label = FORECAST_MODEL_LABELS.get(model, model)
-        self._attr_name = f"({model_label})"
+        self._attr_name = f"Wetter {location_name} ({model_label})"
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
