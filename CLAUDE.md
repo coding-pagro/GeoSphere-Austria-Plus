@@ -58,6 +58,26 @@ All integration code lives in `custom_components/geosphere_austria_plus/`.
 | Ensemble | 1h / 2.5 km | Hourly |
 | Nowcast | 15 min / 1 km | Sub-hourly |
 
+## Optional Improvements (Backlog)
+
+These are planned UX enhancements for the config/options flow — not yet implemented.
+
+### Flexible feature selection via checkboxes
+
+The config and options flow should be restructured into logical sections, with optional features controlled by checkboxes. Fields that are only relevant when a feature is enabled should only be shown (or required) when that feature is checked.
+
+| Feature | Checkbox | Dependent fields | Currently |
+|---------|----------|-----------------|-----------|
+| Forecast models | optional, 0–3 selectable (0 = no forecast) | model multi-select | 1–3 required |
+| Weather warnings (Unwetterwarnungen) | optional checkbox | — (no extra fields) | always on |
+| Air quality index (Luftqualitätsindex) | optional checkbox | — (no extra fields) | always on |
+
+**Implementation notes:**
+- Use HA config flow steps or `async_show_form` with conditional `data_schema` to show/hide dependent fields based on prior selections.
+- When 0 forecast models are selected, skip all `GeoSphereForecastCoordinator` setup and omit `WeatherEntity` registration entirely.
+- When warnings/AQ are unchecked, skip the respective coordinator setup in `__init__.py` and omit those sensor entities.
+- All new boolean options must be added to `strings.json`, `translations/de.json`, and `translations/en.json`.
+
 ## Translations
 
 UI strings are in `strings.json` (English source, HA convention) and mirrored in `translations/de.json` and `translations/en.json`. All three files must be kept in sync when adding new config/options fields or error keys.
