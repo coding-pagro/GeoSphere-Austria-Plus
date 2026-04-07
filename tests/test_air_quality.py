@@ -424,3 +424,79 @@ class TestAirQualitySensorMetadata:
     def test_four_aq_sensor_descriptions(self):
         params = {d.param for d in AIR_QUALITY_SENSORS}
         assert params == {"no2surf", "o3surf", "pm10surf", "pm25surf"}
+
+
+# ---------------------------------------------------------------------------
+# AirQualityIndexSensor._current_index – Zeitstempel-Logik
+# ---------------------------------------------------------------------------
+
+class TestAirQualityIndexCurrentIndex:
+    def test_returns_zero_when_no_timestamps(self):
+        sensor = _make_aqi_sensor(data={"timestamps": []})
+        assert sensor._current_index() == 0
+
+    def test_returns_zero_when_all_timestamps_in_past(self):
+        from datetime import datetime, timezone, timedelta
+        past = [(datetime.now(timezone.utc) - timedelta(hours=i + 2)).isoformat()
+                for i in range(5)]
+        sensor = _make_aqi_sensor(data={"timestamps": past, "no2surf": [float(i) for i in range(5)]})
+        assert sensor._current_index() == 0
+
+    def test_returns_correct_index_for_current_hour(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        # 3 vergangene + 1 aktuelle + 2 zukünftige Timestamps
+        timestamps = [
+            (now - timedelta(hours=5)).isoformat(),
+            (now - timedelta(hours=4)).isoformat(),
+            (now - timedelta(hours=3)).isoformat(),
+            (now - timedelta(minutes=30)).isoformat(),  # Index 3: innerhalb 1h-Fenster
+            (now + timedelta(hours=1)).isoformat(),
+            (now + timedelta(hours=2)).isoformat(),
+        ]
+        sensor = _make_aqi_sensor(data={"timestamps": timestamps})
+        assert sensor._current_index() == 3
+
+    def test_native_value_uses_current_index_not_first(self):
+        """Sicherstellen dass native_value den aktuellen Index nutzt und nicht values[0]."""
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        timestamps = [
+            (now - timedelta(hours=3)).isoformat(),
+            (now - timedelta(hours=2)).isoformat(),
+            (now - timedelta(minutes=30)).isoformat(),  # aktueller Index = 2
+            (now + timedelta(hours=1)).isoformat(),
+        ]
+        # NO2: alt=999.0 (vergangen), aktuell=5.0
+        data = {
+            "timestamps": timestamps,
+            "no2surf":  [999.0, 999.0, 5.0, 6.0],
+            "o3surf":   [999.0, 999.0, 10.0, 11.0],
+            "pm10surf": [999.0, 999.0, 3.0, 4.0],
+            "pm25surf": [999.0, 999.0, 1.0, 2.0],
+        }
+        sensor = _make_aqi_sensor(data=data)
+        # Alle Werte bei Index 2 sind Stufe 1 → AQI = 1, nicht 6
+        assert sensor.native_value == 1
+
+    def test_extra_state_attributes_use_current_index(self):
+        """extra_state_attributes sollen ebenfalls den aktuellen Index verwenden."""
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        timestamps = [
+            (now - timedelta(hours=3)).isoformat(),
+            (now - timedelta(minutes=30)).isoformat(),  # Index 1
+            (now + timedelta(hours=1)).isoformat(),
+        ]
+        data = {
+            "timestamps": timestamps,
+            "no2surf":  [999.0, 5.0, 6.0],
+            "o3surf":   [999.0, 10.0, 11.0],
+            "pm10surf": [999.0, 3.0, 4.0],
+            "pm25surf": [999.0, 1.0, 2.0],
+        }
+        sensor = _make_aqi_sensor(data=data)
+        attrs = sensor.extra_state_attributes
+        # Alle Schadstoffe bei Index 1 sind Stufe 1
+        assert attrs["no2_index"] == 1
+        assert attrs["o3_index"] == 1

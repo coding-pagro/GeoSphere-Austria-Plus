@@ -14,6 +14,8 @@ from custom_components.geosphere_austria_plus.const import (
     CONF_NAME,
     CONF_STATION_ID,
     CONF_FORECAST_MODELS,
+    CONF_ENABLE_WARNINGS,
+    CONF_ENABLE_AIR_QUALITY,
 )
 
 _DEFAULT_LAT = 48.21
@@ -74,13 +76,13 @@ class TestOptionsFlowInit:
         assert result["type"] == "create_entry"
         assert result["data"][CONF_FORECAST_MODELS] == models
 
-    async def test_defaults_to_nwp_when_no_models_selected(self):
+    async def test_empty_models_stored_as_empty_list(self):
         result = await _call(
             _FakeOptionsFlow(),
             user_input={**_BASE_USER_INPUT, CONF_FORECAST_MODELS: []},
         )
         assert result["type"] == "create_entry"
-        assert result["data"][CONF_FORECAST_MODELS] == [DEFAULT_FORECAST_MODEL]
+        assert result["data"][CONF_FORECAST_MODELS] == []
 
     async def test_invalid_models_filtered_out(self):
         result = await _call(
@@ -88,7 +90,7 @@ class TestOptionsFlowInit:
             user_input={**_BASE_USER_INPUT, CONF_FORECAST_MODELS: ["invalid-model"]},
         )
         assert result["type"] == "create_entry"
-        assert result["data"][CONF_FORECAST_MODELS] == [DEFAULT_FORECAST_MODEL]
+        assert result["data"][CONF_FORECAST_MODELS] == []
 
     async def test_mix_of_valid_and_invalid_models(self):
         result = await _call(
@@ -150,6 +152,69 @@ class TestOptionsFlowInit:
         )
         result = await _call(fake, user_input=None)
         assert result["type"] == "form"
+
+    async def test_enable_warnings_true_stored(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input={**_BASE_USER_INPUT, CONF_ENABLE_WARNINGS: True},
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_WARNINGS] is True
+
+    async def test_enable_warnings_false_stored(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input={**_BASE_USER_INPUT, CONF_ENABLE_WARNINGS: False},
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_WARNINGS] is False
+
+    async def test_enable_air_quality_true_stored(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input={**_BASE_USER_INPUT, CONF_ENABLE_AIR_QUALITY: True},
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_AIR_QUALITY] is True
+
+    async def test_enable_air_quality_false_stored(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input={**_BASE_USER_INPUT, CONF_ENABLE_AIR_QUALITY: False},
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_AIR_QUALITY] is False
+
+    async def test_enable_warnings_defaults_to_true_when_missing(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input=_BASE_USER_INPUT,  # kein CONF_ENABLE_WARNINGS
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_WARNINGS] is True
+
+    async def test_enable_air_quality_defaults_to_true_when_missing(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input=_BASE_USER_INPUT,  # kein CONF_ENABLE_AIR_QUALITY
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_AIR_QUALITY] is True
+
+    async def test_zero_models_with_warnings_disabled(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input={
+                **_BASE_USER_INPUT,
+                CONF_FORECAST_MODELS: [],
+                CONF_ENABLE_WARNINGS: False,
+                CONF_ENABLE_AIR_QUALITY: False,
+            },
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_FORECAST_MODELS] == []
+        assert result["data"][CONF_ENABLE_WARNINGS] is False
+        assert result["data"][CONF_ENABLE_AIR_QUALITY] is False
 
 
 # ---------------------------------------------------------------------------
@@ -243,15 +308,15 @@ class TestConfigFlowUserStep:
             user_input={**_BASE_USER_INPUT, CONF_FORECAST_MODELS: ["invalid-model"]},
         )
         assert result["type"] == "create_entry"
-        assert result["data"][CONF_FORECAST_MODELS] == [DEFAULT_FORECAST_MODEL]
+        assert result["data"][CONF_FORECAST_MODELS] == []
 
-    async def test_empty_models_falls_back_to_default(self):
+    async def test_empty_models_stored_as_empty_list(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
         result = await _call_user(
             fake, user_input={**_BASE_USER_INPUT, CONF_FORECAST_MODELS: []}
         )
         assert result["type"] == "create_entry"
-        assert result["data"][CONF_FORECAST_MODELS] == [DEFAULT_FORECAST_MODEL]
+        assert result["data"][CONF_FORECAST_MODELS] == []
 
     async def test_mix_valid_and_invalid_models(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
@@ -295,3 +360,47 @@ class TestConfigFlowUserStep:
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
         await _call_user(fake, user_input=None)
         fake.hass.helpers.aiohttp_client.async_get_clientsession.assert_not_called()
+
+    async def test_enable_warnings_true_stored(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(
+            fake, user_input={**_BASE_USER_INPUT, CONF_ENABLE_WARNINGS: True}
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_WARNINGS] is True
+
+    async def test_enable_warnings_false_stored(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(
+            fake, user_input={**_BASE_USER_INPUT, CONF_ENABLE_WARNINGS: False}
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_WARNINGS] is False
+
+    async def test_enable_air_quality_true_stored(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(
+            fake, user_input={**_BASE_USER_INPUT, CONF_ENABLE_AIR_QUALITY: True}
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_AIR_QUALITY] is True
+
+    async def test_enable_air_quality_false_stored(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(
+            fake, user_input={**_BASE_USER_INPUT, CONF_ENABLE_AIR_QUALITY: False}
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_AIR_QUALITY] is False
+
+    async def test_enable_warnings_defaults_to_true_when_missing(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(fake, user_input=_BASE_USER_INPUT)
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_WARNINGS] is True
+
+    async def test_enable_air_quality_defaults_to_true_when_missing(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(fake, user_input=_BASE_USER_INPUT)
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_AIR_QUALITY] is True

@@ -30,7 +30,9 @@
           "lat": "Latitude",
           "lon": "Longitude",
           "station_id": "TAWES Station (optional)",
-          "forecast_models": "Forecast models (select 1–3)"
+          "forecast_models": "Forecast models (select 0–3)",
+          "enable_warnings": "Enable weather warnings",
+          "enable_air_quality": "Enable air quality index"
         }
       }
     }
@@ -45,7 +47,9 @@
           "lat": "Latitude",
           "lon": "Longitude",
           "station_id": "TAWES Station (optional)",
-          "forecast_models": "Forecast models (select 1–3)"
+          "forecast_models": "Forecast models (select 0–3)",
+          "enable_warnings": "Enable weather warnings",
+          "enable_air_quality": "Enable air quality index"
         }
       }
     },

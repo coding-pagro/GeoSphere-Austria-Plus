@@ -30,7 +30,9 @@
           "lat": "Breitengrad",
           "lon": "Längengrad",
           "station_id": "TAWES-Messstation (optional)",
-          "forecast_models": "Vorhersagemodelle (1–3 wählen)"
+          "forecast_models": "Vorhersagemodelle (0–3 wählen)",
+          "enable_warnings": "Unwetterwarnungen aktivieren",
+          "enable_air_quality": "Luftqualitätsindex aktivieren"
         }
       }
     }
@@ -45,7 +47,9 @@
           "lat": "Breitengrad",
           "lon": "Längengrad",
           "station_id": "TAWES-Messstation (optional)",
-          "forecast_models": "Vorhersagemodelle (1–3 wählen)"
+          "forecast_models": "Vorhersagemodelle (0–3 wählen)",
+          "enable_warnings": "Unwetterwarnungen aktivieren",
+          "enable_air_quality": "Luftqualitätsindex aktivieren"
         }
       }
     },
