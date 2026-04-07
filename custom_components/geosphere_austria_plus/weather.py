@@ -69,10 +69,10 @@ def nwp_to_condition(
     if rain_mm > 0.1:
         return "rainy"
     if tcc is None:
-        # Wolkenbedeckung nicht verfügbar (z. B. Nowcast) – kein Sonnenschein annehmen
+        # Wolkenbedeckung nicht verfügbar (z. B. Nowcast)
         if wind_ms > 10:
             return "windy"
-        return None
+        return "sunny" if is_day else "clear-night"
     if tcc > 0.875:
         return "cloudy"
     if tcc > 0.5:
@@ -106,11 +106,13 @@ async def async_setup_entry(
     )
 
     # Options haben Vorrang (OptionsFlow), dann Data, dann Rückwärtskompatibilität
-    models: list[str] = (
-        entry.options.get(CONF_FORECAST_MODELS)
-        or entry.data.get(CONF_FORECAST_MODELS)
-        or [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
-    )
+    # Explizite Schlüsselprüfung, damit eine leere Liste (0 Modelle) nicht übergangen wird
+    if CONF_FORECAST_MODELS in entry.options:
+        models: list[str] = entry.options[CONF_FORECAST_MODELS]
+    elif CONF_FORECAST_MODELS in entry.data:
+        models = entry.data[CONF_FORECAST_MODELS]
+    else:
+        models = [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
 
     current_coordinator: GeoSphereCurrentCoordinator | None = coordinators.get(DATA_CURRENT)
 
@@ -144,7 +146,7 @@ class GeoSphereWeatherEntity(
     der aktuelle Zustand aus dem ersten Vorhersagepunkt abgeleitet.
     """
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
     _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_native_pressure_unit = UnitOfPressure.HPA
@@ -166,8 +168,7 @@ class GeoSphereWeatherEntity(
         self._lon = lon
         self._attr_unique_id = f"geosphere_plus_{entry_id}_{model}"
 
-        model_label = FORECAST_MODEL_LABELS.get(model, model)
-        self._attr_name = f"Wetter {location_name} ({model_label})"
+        self._attr_name = FORECAST_MODEL_LABELS.get(model, model)
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
@@ -418,8 +419,17 @@ class GeoSphereWeatherEntity(
 
             t_max = max(temps) if temps else None
             t_min = min(temps) if temps else None
-            rain_total = max(rain_list) - min(rain_list) if rain_list else 0.0
-            snow_total = max(snow_list) - min(snow_list) if snow_list else 0.0
+            # rain_acc/snow_acc sind Akkumulationswerte. Summe der positiven Deltas
+            # ergibt die Tagessumme – robust gegen Modell-Lauf-Resets (negatives
+            # Delta = Reset → wird als 0 gezählt).
+            rain_total = sum(
+                max(0.0, rain_list[i + 1] - rain_list[i])
+                for i in range(len(rain_list) - 1)
+            ) if len(rain_list) > 1 else 0.0
+            snow_total = sum(
+                max(0.0, snow_list[i + 1] - snow_list[i])
+                for i in range(len(snow_list) - 1)
+            ) if len(snow_list) > 1 else 0.0
             tcc_avg = sum(tcc_list) / len(tcc_list) if tcc_list else None
             wind_speeds = [
                 math.sqrt((e.get("u10m") or 0.0)**2 + (e.get("v10m") or 0.0)**2)

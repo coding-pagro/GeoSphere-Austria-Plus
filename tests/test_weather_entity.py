@@ -68,14 +68,17 @@ class TestEntityMetadata:
         assert entity._attr_unique_id == "geosphere_plus_test_entry_nwp-v1-1h-2500m"
 
     def test_name(self, entity):
-        assert entity._attr_name == "NWP"  # Modell-Label als Entitätsname unter Gerät
+        assert entity._attr_name == "NWP"
+
+    def test_has_entity_name(self, entity):
+        assert entity._attr_has_entity_name is True
 
     def test_device_info_set(self, entity):
         di = entity._attr_device_info
         assert di is not None
         assert di["identifiers"] == {("geosphere_austria_plus", "test_entry")}
         assert di["name"] == "WIEN HOHE WARTE"
-        assert di["manufacturer"] == "Data provided by GeoSphere Austria"
+        assert di["manufacturer"] == "GeoSphere Austria"
         assert di["entry_type"] == "service"
 
 

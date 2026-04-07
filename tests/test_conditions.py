@@ -1,7 +1,7 @@
 """Tests for nwp_to_condition – pure function, no HA dependencies."""
 import pytest
 
-from custom_components.geosphere_austria_plus.const import nwp_to_condition
+from custom_components.geosphere_austria_plus.weather import nwp_to_condition
 
 
 class TestNwpToCondition:
@@ -78,3 +78,22 @@ class TestNwpToCondition:
     def test_wind_threshold_exact(self):
         # wind > 10 required; exactly 10 → not windy
         assert nwp_to_condition(0.3, 0.0, 0.0, 10.0, True) != "windy"
+
+    # ------------------------------------------------------------------
+    # tcc=None (Nowcast: no cloud cover available)
+    # ------------------------------------------------------------------
+
+    def test_none_tcc_windy_when_strong_wind(self):
+        assert nwp_to_condition(None, 0.0, 0.0, 11.0, True) == "windy"
+
+    def test_none_tcc_sunny_when_calm_day(self):
+        assert nwp_to_condition(None, 0.0, 0.0, 5.0, True) == "sunny"
+
+    def test_none_tcc_clear_night_when_calm_night(self):
+        assert nwp_to_condition(None, 0.0, 0.0, 5.0, False) == "clear-night"
+
+    def test_none_tcc_precipitation_still_takes_priority(self):
+        assert nwp_to_condition(None, 2.0, 0.0, 5.0, True) == "rainy"
+
+    def test_none_tcc_snow_takes_priority(self):
+        assert nwp_to_condition(None, 0.0, 0.5, 5.0, True) == "snowy"

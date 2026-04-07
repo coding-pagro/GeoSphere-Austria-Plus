@@ -330,7 +330,7 @@ class TestGetForecast:
         assert "msl" not in url_called
 
     async def test_nwp_model_uses_full_params(self):
-        """NWP model should include cape in URL params."""
+        """NWP model should include tcc, rain_acc and wind params in URL."""
         payload = {"features": [{"properties": {"parameters": {}}}]}
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
@@ -339,7 +339,11 @@ class TestGetForecast:
         await api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
 
         url_called = session.get.call_args[0][0]
-        assert "cape" in url_called
+        assert "tcc" in url_called
+        assert "rain_acc" in url_called
+        assert "u10m" in url_called
+        assert "cape" not in url_called
+        assert "msl" not in url_called
 
     async def test_ensemble_model_uses_percentile_params(self):
         """Ensemble model uses p50 percentile parameter names."""
@@ -348,9 +352,7 @@ class TestGetForecast:
             t2m_p50=[12.0],
             rain_p50=[0.5],
             snow_p50=[0.0],
-            rr_p50=[0.5],
             sundur_p50=[1800.0],
-            cape_p50=[100.0],
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
@@ -360,8 +362,8 @@ class TestGetForecast:
 
         url_called = session.get.call_args[0][0]
         assert "t2m_p50" in url_called
-        assert "t2m" not in url_called.split("parameters=")[1].split("&")[0].replace("t2m_p50", "")
-
+        assert "rr_p50" not in url_called
+        assert "cape_p50" not in url_called
         # Normalized names
         assert result[0]["t2m"] == 12.0
         assert result[0]["rain_acc"] == 0.5
@@ -373,8 +375,7 @@ class TestGetForecast:
         """sundur_p50 = 3600 s → tcc = 0.0 (clear sky)."""
         payload = _make_forecast_payload(
             ["2024-06-01T12:00:00Z"],
-            t2m_p50=[15.0], rain_p50=[0.0], snow_p50=[0.0],
-            rr_p50=[0.0], sundur_p50=[3600.0], cape_p50=[0.0],
+            t2m_p50=[15.0], rain_p50=[0.0], snow_p50=[0.0], sundur_p50=[3600.0],
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
@@ -385,8 +386,7 @@ class TestGetForecast:
         """sundur_p50 = 0 s → tcc = 1.0 (overcast)."""
         payload = _make_forecast_payload(
             ["2024-06-01T12:00:00Z"],
-            t2m_p50=[8.0], rain_p50=[0.0], snow_p50=[0.0],
-            rr_p50=[0.0], sundur_p50=[0.0], cape_p50=[0.0],
+            t2m_p50=[8.0], rain_p50=[0.0], snow_p50=[0.0], sundur_p50=[0.0],
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
@@ -581,4 +581,62 @@ class TestGetStations:
 
         assert await api.get_stations() == []
 
+
+
+class TestNormalizeNowcastParams:
+    def test_rain_type_1_goes_to_rain_acc(self):
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 2.0, "pt": 1,
+                    "ff": 0.0, "dd": 0.0, "t2m": 5.0, "rh2m": 80.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["rain_acc"] == 2.0
+        assert result[0]["snow_acc"] == 0.0
+
+    def test_snow_type_2_goes_to_snow_acc(self):
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 3.0, "pt": 2,
+                    "ff": 0.0, "dd": 0.0, "t2m": -2.0, "rh2m": 90.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["rain_acc"] == 0.0
+        assert result[0]["snow_acc"] == 3.0
+
+    def test_mixed_type_3_splits_50_50(self):
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 4.0, "pt": 3,
+                    "ff": 0.0, "dd": 0.0, "t2m": 0.0, "rh2m": 95.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["rain_acc"] == pytest.approx(2.0)
+        assert result[0]["snow_acc"] == pytest.approx(2.0)
+
+    def test_no_precip_type_0_gives_zeros(self):
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 0.0, "pt": 0,
+                    "ff": 0.0, "dd": 0.0, "t2m": 10.0, "rh2m": 60.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["rain_acc"] == 0.0
+        assert result[0]["snow_acc"] == 0.0
+
+    def test_type_255_no_precip(self):
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 1.0, "pt": 255,
+                    "ff": 0.0, "dd": 0.0, "t2m": 10.0, "rh2m": 60.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["rain_acc"] == 0.0
+        assert result[0]["snow_acc"] == 0.0
+
+    def test_wind_vector_reconstructed_from_speed_and_direction(self):
+        import math
+        # ff=10, dd=90° (East): u=-ff*sin(90°)=-10, v=-ff*cos(90°)=0
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 0.0, "pt": 255,
+                    "ff": 10.0, "dd": 90.0, "t2m": 10.0, "rh2m": 60.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["u10m"] == pytest.approx(-10.0, abs=1e-6)
+        assert result[0]["v10m"] == pytest.approx(0.0, abs=1e-6)
+
+    def test_tcc_is_always_none(self):
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 0.0, "pt": 0,
+                    "ff": 0.0, "dd": 0.0, "t2m": 10.0, "rh2m": 60.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["tcc"] is None
+
+    def test_datetime_preserved(self):
+        entries = [{"datetime": "2026-04-07T12:00:00Z", "rr": 0.0, "pt": 0,
+                    "ff": 0.0, "dd": 0.0, "t2m": 10.0, "rh2m": 60.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["datetime"] == "2026-04-07T12:00:00Z"
 

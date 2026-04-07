@@ -8,6 +8,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     SelectSelector,
@@ -26,7 +27,8 @@ from .const import (
     CONF_FORECAST_MODELS,
     CONF_LATITUDE,
     CONF_LONGITUDE,
-    CONF_STATION_NAME,
+    CONF_ENABLE_WARNINGS,
+    CONF_ENABLE_AIR_QUALITY,
     FORECAST_MODELS,
     DEFAULT_FORECAST_MODEL,
     FORECAST_MODEL_LABELS,
@@ -60,18 +62,15 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
 
         if user_input is not None:
             raw = user_input.get(CONF_FORECAST_MODELS) or []
-            models = [m for m in raw if m in FORECAST_MODELS] or [DEFAULT_FORECAST_MODEL]
+            models = [m for m in raw if m in FORECAST_MODELS]
 
             name = (user_input.get(CONF_NAME) or "").strip() or self.config_entry.title
             lat = float(user_input[CONF_LATITUDE])
             lon = float(user_input[CONF_LONGITUDE])
             station_raw = user_input.get(CONF_STATION_ID) or _NO_STATION
             station_id: str | None = station_raw.strip() or None
-
-            station_name: str | None = None
-            if station_id:
-                meta = next((s for s in self._stations if s["id"] == station_id), None)
-                station_name = meta["name"] if meta else station_id
+            enable_warnings: bool = bool(user_input.get(CONF_ENABLE_WARNINGS, True))
+            enable_air_quality: bool = bool(user_input.get(CONF_ENABLE_AIR_QUALITY, True))
 
             if name != self.config_entry.title:
                 self.hass.config_entries.async_update_entry(self.config_entry, title=name)
@@ -81,8 +80,9 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_LATITUDE: lat,
                 CONF_LONGITUDE: lon,
                 CONF_STATION_ID: station_id,
-                CONF_STATION_NAME: station_name,
                 CONF_FORECAST_MODELS: models,
+                CONF_ENABLE_WARNINGS: enable_warnings,
+                CONF_ENABLE_AIR_QUALITY: enable_air_quality,
             })
 
         # Aktuelle Werte — Options haben Vorrang vor Data
@@ -106,14 +106,25 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
             if CONF_STATION_ID in self.config_entry.options
             else self.config_entry.data.get(CONF_STATION_ID)
         ) or _NO_STATION
-        current_models = (
-            self.config_entry.options.get(CONF_FORECAST_MODELS)
-            or self.config_entry.data.get(CONF_FORECAST_MODELS)
-            or [DEFAULT_FORECAST_MODEL]
+        if CONF_FORECAST_MODELS in self.config_entry.options:
+            current_models = self.config_entry.options[CONF_FORECAST_MODELS]
+        elif CONF_FORECAST_MODELS in self.config_entry.data:
+            current_models = self.config_entry.data[CONF_FORECAST_MODELS]
+        else:
+            current_models = [DEFAULT_FORECAST_MODEL]
+
+        current_enable_warnings: bool = self.config_entry.options.get(
+            CONF_ENABLE_WARNINGS,
+            self.config_entry.data.get(CONF_ENABLE_WARNINGS, True),
+        )
+        current_enable_air_quality: bool = self.config_entry.options.get(
+            CONF_ENABLE_AIR_QUALITY,
+            self.config_entry.data.get(CONF_ENABLE_AIR_QUALITY, True),
         )
 
         schema = self._build_schema(
-            current_name, current_lat, current_lon, current_station, current_models
+            current_name, current_lat, current_lon, current_station,
+            current_models, current_enable_warnings, current_enable_air_quality,
         )
         return self.async_show_form(step_id="init", data_schema=schema)
 
@@ -124,6 +135,8 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
         lon: float,
         station: str,
         models: list[str],
+        enable_warnings: bool = True,
+        enable_air_quality: bool = True,
     ) -> vol.Schema:
         station_field: Any
         if self._stations:
@@ -157,6 +170,8 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
                     mode=SelectSelectorMode.LIST,
                 )
             ),
+            vol.Optional(CONF_ENABLE_WARNINGS, default=enable_warnings): BooleanSelector(),
+            vol.Optional(CONF_ENABLE_AIR_QUALITY, default=enable_air_quality): BooleanSelector(),
         })
 
 
@@ -188,17 +203,12 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             station_id: str | None = station_raw.strip() or None
 
             raw_models = user_input.get(CONF_FORECAST_MODELS) or []
-            models = [m for m in raw_models if m in FORECAST_MODELS] or [DEFAULT_FORECAST_MODEL]
+            models = [m for m in raw_models if m in FORECAST_MODELS]
+            enable_warnings: bool = bool(user_input.get(CONF_ENABLE_WARNINGS, True))
+            enable_air_quality: bool = bool(user_input.get(CONF_ENABLE_AIR_QUALITY, True))
 
             await self.async_set_unique_id(f"{round(lat, 3)}_{round(lon, 3)}")
             self._abort_if_unique_id_configured()
-
-            station_name: str | None = None
-            if station_id:
-                meta = next(
-                    (s for s in (self._stations or []) if s["id"] == station_id), None
-                )
-                station_name = meta["name"] if meta else station_id
 
             return self.async_create_entry(
                 title=name,
@@ -207,8 +217,9 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_LATITUDE: lat,
                     CONF_LONGITUDE: lon,
                     CONF_STATION_ID: station_id,
-                    CONF_STATION_NAME: station_name,
                     CONF_FORECAST_MODELS: models,
+                    CONF_ENABLE_WARNINGS: enable_warnings,
+                    CONF_ENABLE_AIR_QUALITY: enable_air_quality,
                 },
             )
 
@@ -252,4 +263,6 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     mode=SelectSelectorMode.LIST,
                 )
             ),
+            vol.Optional(CONF_ENABLE_WARNINGS, default=True): BooleanSelector(),
+            vol.Optional(CONF_ENABLE_AIR_QUALITY, default=True): BooleanSelector(),
         })

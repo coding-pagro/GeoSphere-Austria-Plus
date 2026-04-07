@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 DOMAIN = "geosphere_austria_plus"
-DEFAULT_NAME = "GeoSphere Austria Plus"
 CONF_NAME = "name"
 CONF_STATION_ID = "station_id"
 CONF_FORECAST_MODEL = "forecast_model"    # veraltet, nur noch für Rückwärtskompatibilität
 CONF_FORECAST_MODELS = "forecast_models"  # Liste der gewählten Modelle
-CONF_STATION_NAME = "station_name"
 CONF_LATITUDE = "lat"
 CONF_LONGITUDE = "lon"
+CONF_ENABLE_WARNINGS = "enable_warnings"
+CONF_ENABLE_AIR_QUALITY = "enable_air_quality"
 
 # Keys für hass.data
 DATA_CURRENT = "current"
@@ -64,7 +64,7 @@ AQI_BREAKPOINTS: dict[str, list[float]] = {
 
 # Aktuelle Messwerte (TAWES – 10-Minuten-Auflösung)
 TAWES_RESOURCE = "tawes-v1-10min"
-TAWES_PARAMS = "TL,TP,RF,DD,FF,FX,P,PRED,RR,RRM,SO,SH"
+TAWES_PARAMS = "TL,TP,RF,DD,FF,FX,P,PRED,RR,SO,SH"
 
 # Vorhersagemodelle (gültige IDs – Bezeichnungen in den Übersetzungsdateien)
 FORECAST_MODELS = [
@@ -81,10 +81,12 @@ FORECAST_MODEL_LABELS = {
 }
 
 # Vorhersageparameter (NWP / Nowcast)
-NWP_PARAMS = "t2m,rh2m,u10m,v10m,rain_acc,snow_acc,cape,tcc,msl"
+NWP_PARAMS = "t2m,rh2m,u10m,v10m,rain_acc,snow_acc,tcc"
+NOWCAST_PARAMS = "t2m,rh2m,ff,dd,rr,pt"
 
 # Vorhersageparameter (Ensemble – Median-Perzentile, andere Namenskonvention)
-ENSEMBLE_PARAMS = "t2m_p50,rain_p50,snow_p50,rr_p50,sundur_p50,cape_p50"
+# Hinweis: rh2m ist im Ensemble-Modell nicht verfügbar → humidity immer None.
+ENSEMBLE_PARAMS = "t2m_p50,rain_p50,snow_p50,sundur_p50"
 
 # Normalisierung: Ensemble-Parameternamen → NWP-Parameternamen
 # Ermöglicht identische Verarbeitung in weather.py
@@ -93,6 +95,5 @@ ENSEMBLE_PARAM_MAP = {
     "rain_p50":   "rain_acc",
     "snow_p50":   "snow_acc",
     "sundur_p50": "sundur",
-    "cape_p50":   "cape",
 }
 

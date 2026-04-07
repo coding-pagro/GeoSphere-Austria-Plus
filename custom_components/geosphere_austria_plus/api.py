@@ -16,6 +16,7 @@ from .const import (
     TAWES_RESOURCE,
     TAWES_PARAMS,
     NWP_PARAMS,
+    NOWCAST_PARAMS,
     ENSEMBLE_PARAMS,
     ENSEMBLE_PARAM_MAP,
     WARNINGS_API_BASE,
@@ -48,7 +49,7 @@ class GeoSphereApi:
         try:
             async with self._session.get(url, timeout=TIMEOUT) as resp:
                 resp.raise_for_status()
-                data = await resp.json()
+                data = await resp.json(content_type=None)
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
             raise GeoSphereApiError(f"Fehler beim Abrufen der Stationsliste: {err}") from err
 
@@ -84,7 +85,7 @@ class GeoSphereApi:
             try:
                 async with self._session.get(url, timeout=TIMEOUT) as resp:
                     if resp.status == 400:
-                        body = await resp.json()
+                        body = await resp.json(content_type=None)
                         detail = body.get("detail", "")
                         missing = self._extract_missing_params(detail)
                         if missing and _attempt == 0:
@@ -100,7 +101,7 @@ class GeoSphereApi:
                             f"Fehler beim Abrufen aktueller Daten: HTTP 400 – {detail}"
                         )
                     resp.raise_for_status()
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 raise GeoSphereApiError(f"Fehler beim Abrufen aktueller Daten: {err}") from err
             return self._parse_station_geojson(data, station_id)
@@ -242,7 +243,7 @@ class GeoSphereApi:
         elif "nwp" in model:
             params = NWP_PARAMS
         else:
-            params = "t2m,rh2m,ff,dd,rr,pt"  # Nowcast
+            params = NOWCAST_PARAMS
 
         for _attempt in range(2):
             url = (
@@ -252,7 +253,7 @@ class GeoSphereApi:
             try:
                 async with self._session.get(url, timeout=TIMEOUT) as resp:
                     if resp.status == 400:
-                        body = await resp.json()
+                        body = await resp.json(content_type=None)
                         detail = body.get("detail", "")
                         missing = self._extract_missing_params(detail)
                         if missing and _attempt == 0:
@@ -268,7 +269,7 @@ class GeoSphereApi:
                             f"Fehler beim Abrufen der Vorhersage: HTTP 400 – {detail}"
                         )
                     resp.raise_for_status()
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 raise GeoSphereApiError(f"Fehler beim Abrufen der Vorhersage: {err}") from err
             result = self._parse_forecast_geojson(data)
@@ -384,7 +385,7 @@ class GeoSphereApi:
         try:
             async with self._session.get(url, timeout=TIMEOUT) as resp:
                 resp.raise_for_status()
-                data = await resp.json()
+                data = await resp.json(content_type=None)
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
             raise GeoSphereApiError(
                 f"Fehler beim Abrufen der Schadstoffvorhersage: {err}"
@@ -401,18 +402,4 @@ class GeoSphereApi:
             result[param] = info.get("data", [])
         return result
 
-    async def get_station_name(self, station_id: str) -> str:
-        """Gibt den Stationsnamen aus dem Metadaten-Endpunkt zurück."""
-        url = f"{API_BASE}/station/current/{TAWES_RESOURCE}/metadata?station_ids={quote(station_id, safe='')}"
-        try:
-            async with self._session.get(url, timeout=TIMEOUT) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-            raise GeoSphereApiError(f"Fehler beim Abrufen der Stationsmetadaten: {err}") from err
-
-        for station in data.get("stations", []):
-            if str(station.get("id")) == str(station_id):
-                return station.get("name", station_id)
-        return station_id
 

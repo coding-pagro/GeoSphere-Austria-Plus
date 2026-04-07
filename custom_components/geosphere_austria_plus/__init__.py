@@ -4,17 +4,19 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
     DOMAIN,
-    CONF_NAME,
     CONF_STATION_ID,
     CONF_FORECAST_MODEL,
     CONF_FORECAST_MODELS,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_ENABLE_WARNINGS,
+    CONF_ENABLE_AIR_QUALITY,
     DATA_CURRENT,
     DATA_FORECASTS,
     DATA_WARNINGS,
@@ -30,7 +32,7 @@ from .coordinator import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["weather", "sensor"]
+PLATFORMS = [Platform.WEATHER, Platform.SENSOR]
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -58,11 +60,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         station_id = entry.data.get(CONF_STATION_ID) or None
 
-    # Vorhersagemodelle: Options → Data → Rückwärtskompatibilität
-    models: list[str] = (
-        entry.options.get(CONF_FORECAST_MODELS)
-        or entry.data.get(CONF_FORECAST_MODELS)
-        or [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
+    # Vorhersagemodelle: Options → Data → Rückwärtskompatibilität (leere Liste = kein Forecast)
+    if CONF_FORECAST_MODELS in entry.options:
+        models: list[str] = entry.options[CONF_FORECAST_MODELS]
+    elif CONF_FORECAST_MODELS in entry.data:
+        models = entry.data[CONF_FORECAST_MODELS]
+    else:
+        models = [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
+
+    # Optionale Features: Options haben Vorrang vor Data, Default = aktiviert
+    enable_warnings: bool = entry.options.get(
+        CONF_ENABLE_WARNINGS,
+        entry.data.get(CONF_ENABLE_WARNINGS, True),
+    )
+    enable_air_quality: bool = entry.options.get(
+        CONF_ENABLE_AIR_QUALITY,
+        entry.data.get(CONF_ENABLE_AIR_QUALITY, True),
     )
 
     coordinators: dict = {DATA_FORECASTS: {}}
@@ -87,39 +100,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await fc.async_config_entry_first_refresh()
         coordinators[DATA_FORECASTS][model] = fc
 
-    # Warnungs-Koordinator (immer, optional)
-    warnings_coordinator = GeoSphereWarningsCoordinator(hass, lat, lon)
-    try:
-        await warnings_coordinator.async_config_entry_first_refresh()
-        coordinators[DATA_WARNINGS] = warnings_coordinator
-    except ConfigEntryNotReady as err:
-        _LOGGER.warning(
-            "Warnungs-API nicht erreichbar: %s – Integration läuft ohne Warnungen weiter",
-            err,
-        )
+    # Warnungs-Koordinator (optional, konfigurierbar)
+    if enable_warnings:
+        warnings_coordinator = GeoSphereWarningsCoordinator(hass, lat, lon)
+        try:
+            await warnings_coordinator.async_config_entry_first_refresh()
+            coordinators[DATA_WARNINGS] = warnings_coordinator
+        except ConfigEntryNotReady as err:
+            _LOGGER.warning(
+                "Warnungs-API nicht erreichbar: %s – Integration läuft ohne Warnungen weiter",
+                err,
+            )
 
-    # Luftqualitäts-Koordinator (immer, optional)
-    aq_coordinator = GeoSphereAirQualityCoordinator(hass, lat, lon)
-    try:
-        await aq_coordinator.async_config_entry_first_refresh()
-        coordinators[DATA_AIR_QUALITY] = aq_coordinator
-    except ConfigEntryNotReady as err:
-        _LOGGER.warning(
-            "Schadstoff-API nicht erreichbar: %s – Integration läuft ohne Luftqualitätsdaten weiter",
-            err,
-        )
+    # Luftqualitäts-Koordinator (optional, konfigurierbar)
+    if enable_air_quality:
+        aq_coordinator = GeoSphereAirQualityCoordinator(hass, lat, lon)
+        try:
+            await aq_coordinator.async_config_entry_first_refresh()
+            coordinators[DATA_AIR_QUALITY] = aq_coordinator
+        except ConfigEntryNotReady as err:
+            _LOGGER.warning(
+                "Schadstoff-API nicht erreichbar: %s – Integration läuft ohne Luftqualitätsdaten weiter",
+                err,
+            )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Veraltete Entities entfernen (z.B. nach Modell-Deaktivierung oder Station-Entfernung)
-    active_ids: set[str] = coordinators.pop("_active_unique_ids", set())
-    ent_reg = er.async_get(hass)
-    for reg_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        if reg_entry.unique_id not in active_ids:
-            _LOGGER.debug("Veraltete Entity entfernen: %s", reg_entry.entity_id)
-            ent_reg.async_remove(reg_entry.entity_id)
+    # Veraltete Entities entfernen (z.B. nach Modell-Deaktivierung oder Station-Entfernung).
+    # Beide Plattformen befüllen _active_unique_ids immer (auch bei 0 Entities),
+    # sodass dieser Schlüssel nach async_forward_entry_setups immer vorhanden ist.
+    # Bei 0 aktiven Entities wird der Set leer → alle veralteten Entities werden entfernt.
+    if "_active_unique_ids" in coordinators:
+        active_ids: set[str] = coordinators.pop("_active_unique_ids")
+        ent_reg = er.async_get(hass)
+        for reg_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+            if reg_entry.unique_id not in active_ids:
+                _LOGGER.debug("Veraltete Entity entfernen: %s", reg_entry.entity_id)
+                ent_reg.async_remove(reg_entry.entity_id)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True

@@ -33,11 +33,11 @@ from .const import (
     DOMAIN,
     CONF_NAME,
     CONF_STATION_ID,
-    CONF_STATION_NAME,
     DATA_CURRENT,
     DATA_WARNINGS,
     DATA_AIR_QUALITY,
     WARNING_TYPES,
+    WARNING_LEVELS,
     AQI_BREAKPOINTS,
 )
 from .coordinator import (
@@ -45,6 +45,18 @@ from .coordinator import (
     GeoSphereWarningsCoordinator,
     GeoSphereAirQualityCoordinator,
 )
+
+
+def _make_device_info(entry_id: str, location_name: str) -> DeviceInfo:
+    """Gemeinsame DeviceInfo für alle GeoSphere-Entities."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry_id)},
+        name=location_name,
+        manufacturer="GeoSphere Austria",
+        model="DataHub API v1",
+        entry_type=DeviceEntryType.SERVICE,
+        configuration_url="https://dataset.api.hub.geosphere.at/v1",
+    )
 
 
 @dataclass(frozen=True)
@@ -255,14 +267,7 @@ class TawesSensor(CoordinatorEntity[GeoSphereCurrentCoordinator], SensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"geosphere_plus_{entry_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            name=location_name,
-            manufacturer="GeoSphere Austria",
-            model="DataHub API v1",
-            entry_type=DeviceEntryType.SERVICE,
-            configuration_url="https://dataset.api.hub.geosphere.at/v1",
-        )
+        self._attr_device_info = _make_device_info(entry_id, location_name)
 
     @property
     def native_value(self) -> float | None:
@@ -288,14 +293,7 @@ class GeoSphereWarningSensor(
     ) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"geosphere_plus_{entry_id}_warning_level"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            name=location_name,
-            manufacturer="GeoSphere Austria",
-            model="DataHub API v1",
-            entry_type=DeviceEntryType.SERVICE,
-            configuration_url="https://dataset.api.hub.geosphere.at/v1",
-        )
+        self._attr_device_info = _make_device_info(entry_id, location_name)
 
     @property
     def native_value(self) -> int:
@@ -323,6 +321,7 @@ class GeoSphereWarningSensor(
             entry: dict[str, Any] = {
                 "type": WARNING_TYPES.get(w["type_id"], str(w["type_id"])),
                 "level": w["level"],
+                "level_name": WARNING_LEVELS.get(w["level"], str(w["level"])),
                 "text": w["text"],
             }
             if w.get("begin") is not None:
@@ -341,32 +340,13 @@ class GeoSphereWarningSensor(
         return {"warnings": result}
 
 
-class AirQualitySensor(
+class _AirQualityBase(
     CoordinatorEntity[GeoSphereAirQualityCoordinator], SensorEntity
 ):
-    """Stündlicher Schadstoffwert (erste Vorhersagestunde) als HA-Sensor."""
+    """Gemeinsame Basisklasse für Luftqualitäts-Sensoren."""
 
     _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
-
-    def __init__(
-        self,
-        coordinator: GeoSphereAirQualityCoordinator,
-        description: AirQualitySensorDescription,
-        entry_id: str,
-        location_name: str,
-    ) -> None:
-        super().__init__(coordinator)
-        self.entity_description = description
-        self._attr_unique_id = f"geosphere_plus_{entry_id}_aq_{description.param}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            name=location_name,
-            manufacturer="GeoSphere Austria",
-            model="DataHub API v1",
-            entry_type=DeviceEntryType.SERVICE,
-            configuration_url="https://dataset.api.hub.geosphere.at/v1",
-        )
 
     def _current_index(self) -> int:
         """Index des ersten aktuellen/zukünftigen Vorhersagepunkts."""
@@ -380,6 +360,22 @@ class AirQualitySensor(
             if dt >= now - timedelta(hours=1):
                 return i
         return 0
+
+
+class AirQualitySensor(_AirQualityBase):
+    """Stündlicher Schadstoffwert (erste Vorhersagestunde) als HA-Sensor."""
+
+    def __init__(
+        self,
+        coordinator: GeoSphereAirQualityCoordinator,
+        description: AirQualitySensorDescription,
+        entry_id: str,
+        location_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"geosphere_plus_{entry_id}_aq_{description.param}"
+        self._attr_device_info = _make_device_info(entry_id, location_name)
 
     @property
     def native_value(self) -> float | None:
@@ -409,13 +405,9 @@ class AirQualitySensor(
         return {"forecast": forecast}
 
 
-class AirQualityIndexSensor(
-    CoordinatorEntity[GeoSphereAirQualityCoordinator], SensorEntity
-):
+class AirQualityIndexSensor(_AirQualityBase):
     """EU-Luftqualitätsindex (1–6) aggregiert aus NO₂, O₃, PM10 und PM2.5."""
 
-    _attr_has_entity_name = True
-    _attr_attribution = ATTRIBUTION
     _attr_translation_key = "aqi"
 
     def __init__(
@@ -426,14 +418,7 @@ class AirQualityIndexSensor(
     ) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"geosphere_plus_{entry_id}_aqi"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            name=location_name,
-            manufacturer="GeoSphere Austria",
-            model="DataHub API v1",
-            entry_type=DeviceEntryType.SERVICE,
-            configuration_url="https://dataset.api.hub.geosphere.at/v1",
-        )
+        self._attr_device_info = _make_device_info(entry_id, location_name)
 
     @property
     def native_value(self) -> int | None:
@@ -441,11 +426,12 @@ class AirQualityIndexSensor(
         data = self.coordinator.data
         if not data:
             return None
+        idx = self._current_index()
         indices = []
         for param in AQI_BREAKPOINTS:
             values = data.get(param)
-            if values:
-                indices.append(_compute_aqi_level(values[0], param))
+            if values and idx < len(values):
+                indices.append(_compute_aqi_level(values[idx], param))
         return max(indices) if indices else None
 
     @property
@@ -463,9 +449,10 @@ class AirQualityIndexSensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         """EU-Luftqualitätsstufe je Schadstoff."""
         data = self.coordinator.data or {}
+        idx = self._current_index()
         attrs: dict[str, Any] = {}
         for param, attr_key in _AQI_ATTR_KEY.items():
             values = data.get(param)
-            if values:
-                attrs[attr_key] = _compute_aqi_level(values[0], param)
+            if values and idx < len(values):
+                attrs[attr_key] = _compute_aqi_level(values[idx], param)
         return attrs
