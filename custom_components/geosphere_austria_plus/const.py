@@ -81,19 +81,22 @@ FORECAST_MODEL_LABELS = {
 }
 
 # Vorhersageparameter (NWP / Nowcast)
-NWP_PARAMS = "t2m,rh2m,u10m,v10m,rain_acc,snow_acc,tcc"
+NWP_PARAMS = "t2m,rh2m,u10m,v10m,rain_acc,snow_acc,tcc,grad"
 NOWCAST_PARAMS = "t2m,rh2m,ff,dd,rr,pt"
 
 # Vorhersageparameter (Ensemble – Median-Perzentile, andere Namenskonvention)
 # Hinweis: rh2m ist im Ensemble-Modell nicht verfügbar → humidity immer None.
-ENSEMBLE_PARAMS = "t2m_p50,rain_p50,snow_p50,sundur_p50"
+ENSEMBLE_PARAMS = "t2m_p50,rain_p50,snow_p50,sundur_p50,grad_p50"
 
 # Normalisierung: Ensemble-Parameternamen → NWP-Parameternamen
 # Ermöglicht identische Verarbeitung in weather.py
+# Hinweis: grad_p50 (W/m²) ist ein Momentanwert, NWP grad (Ws/m²) wird in
+# api.py per Delta/3600 in W/m² umgerechnet – danach identisches Format.
 ENSEMBLE_PARAM_MAP = {
     "t2m_p50":    "t2m",
     "rain_p50":   "rain_acc",
     "snow_p50":   "snow_acc",
     "sundur_p50": "sundur",
+    "grad_p50":   "grad",
 }
 

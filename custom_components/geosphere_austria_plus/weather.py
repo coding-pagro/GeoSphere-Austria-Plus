@@ -425,18 +425,20 @@ class GeoSphereWeatherEntity(
             if cond is None:
                 cond = self.condition
 
-            forecasts.append(
-                Forecast(
-                    datetime=dt.isoformat(),
-                    condition=cond,
-                    native_temperature=t2m,
-                    native_precipitation=rain,
-                    humidity=rh,
-                    native_wind_speed=wind_speed,
-                    wind_bearing=wind_bearing,
-                    is_daytime=is_day,
-                )
+            forecast_entry = Forecast(
+                datetime=dt.isoformat(),
+                condition=cond,
+                native_temperature=t2m,
+                native_precipitation=rain,
+                humidity=rh,
+                native_wind_speed=wind_speed,
+                wind_bearing=wind_bearing,
+                is_daytime=is_day,
             )
+            grad = entry.get("grad")
+            if grad is not None:
+                forecast_entry["solar_irradiance"] = round(grad, 1)  # type: ignore[typeddict-unknown-key]
+            forecasts.append(forecast_entry)
 
         return forecasts[:48]
 

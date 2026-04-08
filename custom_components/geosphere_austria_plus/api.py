@@ -177,6 +177,26 @@ class GeoSphereApi:
         return normalized
 
     @staticmethod
+    def _deaccumulate_grad(entries: list[dict]) -> None:
+        """NWP-Globalstrahlung von akkumulierten Ws/m² in mittlere W/m² je Zeitschritt umrechnen.
+
+        NWP liefert grad als Energiesumme seit Modellstart (Ws/m²). Für stündliche Schritte
+        ergibt Delta/3600 die mittlere Bestrahlungsstärke (W/m²) des jeweiligen Zeitschritts.
+        Negative Deltas (Modell-Reset) werden als 0 behandelt. Ändert die Einträge in-place.
+        """
+        prev: float | None = None
+        for entry in entries:
+            raw = entry.get("grad")
+            if raw is None:
+                prev = None
+                continue
+            if prev is None:
+                entry["grad"] = round(raw / 3600.0, 2)
+            else:
+                entry["grad"] = round(max(0.0, raw - prev) / 3600.0, 2)
+            prev = raw
+
+    @staticmethod
     def _extract_missing_params(detail: str) -> set[str]:
         """Extrahiert Parameternamen aus einer API-400-Fehlermeldung."""
         match = re.search(r"\{([^}]+)\}", detail)
@@ -277,6 +297,9 @@ class GeoSphereApi:
                 result = self._normalize_ensemble_params(result)
             elif "nowcast" in model:
                 result = self._normalize_nowcast_params(result)
+            else:
+                # NWP: grad ist akkumuliert in Ws/m² → in mittlere W/m² je Zeitschritt umrechnen
+                self._deaccumulate_grad(result)
             return result
 
         raise GeoSphereApiError("Fehler beim Abrufen der Vorhersage")
