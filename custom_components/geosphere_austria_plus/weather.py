@@ -200,13 +200,35 @@ class GeoSphereWeatherEntity(
     def _forecast_raw(self) -> list[dict[str, Any]]:
         return self.coordinator.data or []
 
+    @property
+    def _first_forecast_entry(self) -> dict[str, Any] | None:
+        """Erster gültiger Vorhersagepunkt (max. 1 h in der Vergangenheit)."""
+        now = datetime.now(timezone.utc)
+        for entry in self._forecast_raw:
+            ts_str = entry.get("datetime")
+            if not ts_str:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if dt >= now - timedelta(hours=1):
+                return entry
+        return None
+
     # ------------------------------------------------------------------
-    # Aktuelle Werte (aus TAWES wenn vorhanden, sonst None)
+    # Aktuelle Werte – aus TAWES wenn vorhanden, sonst aus erstem
+    # Vorhersagepunkt (Fallback ohne konfigurierte Station).
+    # Kein Forecast-Äquivalent: Taupunkt, Luftdruck, Böen.
     # ------------------------------------------------------------------
 
     @property
     def native_temperature(self) -> float | None:
-        return self._current.get("TL")
+        v = self._current.get("TL")
+        if v is not None:
+            return v
+        entry = self._first_forecast_entry
+        return entry.get("t2m") if entry else None
 
     @property
     def native_dew_point(self) -> float | None:
@@ -214,7 +236,11 @@ class GeoSphereWeatherEntity(
 
     @property
     def humidity(self) -> float | None:
-        return self._current.get("RF")
+        v = self._current.get("RF")
+        if v is not None:
+            return v
+        entry = self._first_forecast_entry
+        return entry.get("rh2m") if entry else None
 
     @property
     def native_pressure(self) -> float | None:
@@ -222,11 +248,37 @@ class GeoSphereWeatherEntity(
 
     @property
     def wind_bearing(self) -> float | None:
-        return self._current.get("DD")
+        v = self._current.get("DD")
+        if v is not None:
+            return v
+        entry = self._first_forecast_entry
+        if entry is None:
+            return None
+        # Nowcast liefert dd direkt; NWP/Ensemble: aus u10m/v10m berechnen
+        if entry.get("dd") is not None:
+            return float(entry["dd"])
+        u10 = entry.get("u10m") or 0.0
+        v10 = entry.get("v10m") or 0.0
+        if u10 or v10:
+            return (math.degrees(math.atan2(u10, v10)) + 180) % 360
+        return None
 
     @property
     def native_wind_speed(self) -> float | None:
-        return self._current.get("FF")
+        v = self._current.get("FF")
+        if v is not None:
+            return v
+        entry = self._first_forecast_entry
+        if entry is None:
+            return None
+        # Nowcast liefert ff direkt; NWP/Ensemble: aus u10m/v10m berechnen
+        if entry.get("ff") is not None:
+            return float(entry["ff"])
+        u10 = entry.get("u10m") or 0.0
+        v10 = entry.get("v10m") or 0.0
+        if u10 or v10:
+            return math.sqrt(u10**2 + v10**2)
+        return None
 
     @property
     def native_wind_gust_speed(self) -> float | None:
@@ -234,8 +286,14 @@ class GeoSphereWeatherEntity(
 
     @property
     def native_precipitation(self) -> float | None:
-        """Niederschlag der letzten 10 Minuten in mm."""
-        return self._current.get("RR")
+        v = self._current.get("RR")
+        if v is not None:
+            return v
+        entry = self._first_forecast_entry
+        if entry is None:
+            return None
+        # Nowcast: rr (Niederschlagsrate mm/15min); NWP/Ensemble: rain_acc (akkumuliert)
+        return entry.get("rr") or entry.get("rain_acc")
 
     # ------------------------------------------------------------------
     # Condition – aus TAWES abgeleitet wenn vorhanden, sonst aus Forecast
