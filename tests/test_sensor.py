@@ -24,6 +24,7 @@ def coordinator():
         "RR": 0.0,
         "SO": 480.0,
         "SH": 0.0,
+        "GLOW": 350.0,
     }
     return coord
 
@@ -38,7 +39,7 @@ def _make_sensor(coordinator, description):
 
 class TestSensorDescriptions:
     def test_sensor_count(self):
-        assert len(SENSORS) == 11
+        assert len(SENSORS) == 12
 
     def test_all_have_param(self):
         for desc in SENSORS:
@@ -102,6 +103,7 @@ class TestNativeValue:
         ("precipitation",   "RR",   0.0),
         ("sunshine_duration","SO",  480.0),
         ("snow_height",     "SH",   0.0),
+        ("global_radiation","GLOW", 350.0),
     ])
     def test_value(self, coordinator, key, param, expected):
         desc = next(d for d in SENSORS if d.key == key)

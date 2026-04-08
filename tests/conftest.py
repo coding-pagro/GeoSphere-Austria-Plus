@@ -9,12 +9,23 @@ from unittest.mock import AsyncMock, MagicMock
 # Lightweight stand-ins for Home Assistant classes
 # ---------------------------------------------------------------------------
 
-class _MockForecast:
-    """Accepts the same keyword arguments as the real HA Forecast TypedDict."""
+class _MockForecast(dict):
+    """Dict-basierter Stub für HA Forecast TypedDict.
+
+    Das echte HA Forecast ist ein TypedDict (= dict zur Laufzeit).
+    Beide Zugriffsarten müssen funktionieren:
+      forecast.native_temperature  (Attributzugriff – bestehende Tests)
+      forecast["solar_irradiance"] (Dict-Zugriff – für Extra-Felder)
+    """
 
     def __init__(self, **kwargs):
+        super().__init__(kwargs)
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        setattr(self, key, value)
 
 
 class _MockWeatherEntityFeature:
@@ -77,6 +88,7 @@ class _MockSensorDeviceClass:
     WIND_SPEED = "wind_speed"
     PRECIPITATION = "precipitation"
     DURATION = "duration"
+    IRRADIANCE = "irradiance"
     NITROGEN_DIOXIDE = "nitrogen_dioxide"
     OZONE = "ozone"
     PM10 = "pm10"
@@ -122,7 +134,12 @@ _const_mod.UnitOfTemperature.CELSIUS = "°C"
 _const_mod.UnitOfPressure.HPA = "hPa"
 _const_mod.UnitOfSpeed.METERS_PER_SECOND = "m/s"
 _const_mod.UnitOfLength.MILLIMETERS = "mm"
+_const_mod.UnitOfLength.CENTIMETERS = "cm"
+_const_mod.UnitOfIrradiance.WATTS_PER_SQUARE_METER = "W/m²"
+_const_mod.UnitOfTime.SECONDS = "s"
 _const_mod.CONCENTRATION_MICROGRAMS_PER_CUBIC_METER = "µg/m³"
+_const_mod.DEGREE = "°"
+_const_mod.PERCENTAGE = "%"
 
 class _MockDeviceInfo(dict):
     """Minimal stand-in for DeviceInfo (TypedDict subclass in HA)."""

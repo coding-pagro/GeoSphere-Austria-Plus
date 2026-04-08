@@ -330,7 +330,7 @@ class TestGetForecast:
         assert "msl" not in url_called
 
     async def test_nwp_model_uses_full_params(self):
-        """NWP model should include tcc, rain_acc and wind params in URL."""
+        """NWP model should include tcc, rain_acc, wind and grad params in URL."""
         payload = {"features": [{"properties": {"parameters": {}}}]}
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
@@ -342,17 +342,19 @@ class TestGetForecast:
         assert "tcc" in url_called
         assert "rain_acc" in url_called
         assert "u10m" in url_called
+        assert "grad" in url_called
         assert "cape" not in url_called
         assert "msl" not in url_called
 
     async def test_ensemble_model_uses_percentile_params(self):
-        """Ensemble model uses p50 percentile parameter names."""
+        """Ensemble model uses p50 percentile parameter names including grad_p50."""
         payload = _make_forecast_payload(
             ["2024-06-01T12:00:00Z"],
             t2m_p50=[12.0],
             rain_p50=[0.5],
             snow_p50=[0.0],
             sundur_p50=[1800.0],
+            grad_p50=[250.0],
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
@@ -362,12 +364,15 @@ class TestGetForecast:
 
         url_called = session.get.call_args[0][0]
         assert "t2m_p50" in url_called
+        assert "grad_p50" in url_called
         assert "rr_p50" not in url_called
         assert "cape_p50" not in url_called
         # Normalized names
         assert result[0]["t2m"] == 12.0
         assert result[0]["rain_acc"] == 0.5
         assert result[0]["snow_acc"] == 0.0
+        # grad_p50 (W/m², direkt) → grad
+        assert result[0]["grad"] == 250.0
         # tcc derived from sundur: 1 - 1800/3600 = 0.5
         assert abs(result[0]["tcc"] - 0.5) < 1e-6
 
@@ -639,4 +644,71 @@ class TestNormalizeNowcastParams:
                     "ff": 0.0, "dd": 0.0, "t2m": 10.0, "rh2m": 60.0}]
         result = GeoSphereApi._normalize_nowcast_params(entries)
         assert result[0]["datetime"] == "2026-04-07T12:00:00Z"
+
+
+class TestDeaccumulateGrad:
+    """Tests für die NWP-Globalstrahlungs-Deakkumulation (Ws/m² → W/m²)."""
+
+    def _entries(self, grad_values: list) -> list[dict]:
+        return [{"datetime": f"2024-06-01T{i:02d}:00:00Z", "grad": v}
+                for i, v in enumerate(grad_values)]
+
+    def test_first_entry_divided_by_3600(self):
+        """Erster Eintrag: akkumulierter Wert / 3600 = mittlere W/m²."""
+        entries = self._entries([3600.0])
+        GeoSphereApi._deaccumulate_grad(entries)
+        assert entries[0]["grad"] == pytest.approx(1.0)
+
+    def test_subsequent_entries_use_delta(self):
+        """Folgeeinträge: (current - previous) / 3600."""
+        entries = self._entries([0.0, 3600.0, 10800.0])
+        GeoSphereApi._deaccumulate_grad(entries)
+        assert entries[0]["grad"] == pytest.approx(0.0)
+        assert entries[1]["grad"] == pytest.approx(1.0)   # (3600-0)/3600
+        assert entries[2]["grad"] == pytest.approx(2.0)   # (10800-3600)/3600
+
+    def test_negative_delta_clamped_to_zero(self):
+        """Modell-Reset: negatives Delta wird auf 0 geklemmt."""
+        entries = self._entries([7200.0, 3600.0])
+        GeoSphereApi._deaccumulate_grad(entries)
+        assert entries[0]["grad"] == pytest.approx(2.0)
+        assert entries[1]["grad"] == pytest.approx(0.0)
+
+    def test_none_grad_is_left_unchanged_and_resets_accumulator(self):
+        """None-Einträge bleiben None; danach wird der Akkumulator zurückgesetzt."""
+        entries = [
+            {"datetime": "2024-06-01T00:00:00Z", "grad": 3600.0},
+            {"datetime": "2024-06-01T01:00:00Z", "grad": None},
+            {"datetime": "2024-06-01T02:00:00Z", "grad": 7200.0},
+        ]
+        GeoSphereApi._deaccumulate_grad(entries)
+        assert entries[0]["grad"] == pytest.approx(1.0)
+        assert entries[1]["grad"] is None
+        # Nach dem Reset wird der dritte Eintrag wie ein Ersteintrag behandelt
+        assert entries[2]["grad"] == pytest.approx(2.0)   # 7200/3600
+
+    def test_modifies_entries_in_place(self):
+        """_deaccumulate_grad gibt None zurück und ändert die Liste direkt."""
+        entries = self._entries([3600.0])
+        result = GeoSphereApi._deaccumulate_grad(entries)
+        assert result is None
+        assert entries[0]["grad"] == pytest.approx(1.0)
+
+    def test_nwp_forecast_applies_deaccumulation(self):
+        """get_forecast ruft _deaccumulate_grad für NWP-Modelle auf."""
+        payload = _make_forecast_payload(
+            ["2024-06-01T06:00:00Z", "2024-06-01T07:00:00Z"],
+            t2m=[15.0, 16.0],
+            grad=[0.0, 720000.0],   # 0 Ws/m² → 200 W/m² (720000/3600=200)
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+        api = GeoSphereApi(session)
+
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
+        )
+        assert result[0]["grad"] == pytest.approx(0.0)    # 0/3600
+        assert result[1]["grad"] == pytest.approx(200.0)  # (720000-0)/3600
 

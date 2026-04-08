@@ -203,13 +203,94 @@ class TestConditionDerivation:
         cond = entity.condition
         assert cond in ("sunny", "clear-night")
 
-    def test_empty_tawes_data_falls_back_to_forecast(self, entity, current_coord, forecast_coord):
+    def test_empty_tawes_data_falls_back_to_forecast(self, entity, current_coord, forecast_coord):  # noqa: E501
         """Wenn TAWES-Daten leer sind, wird condition aus der Vorhersage abgeleitet.
         Bei leerer Vorhersage ist das Ergebnis None."""
         current_coord.data = {}
         forecast_coord.data = []
         cond = entity.condition
         assert cond is None  # Kein TAWES, keine Vorhersage → kein Zustand ableitbar
+
+
+# ---------------------------------------------------------------------------
+# Fallback-Properties ohne TAWES-Station (Werte aus erstem Forecast-Punkt)
+# ---------------------------------------------------------------------------
+
+class TestForecastFallbackProperties:
+    """Wenn kein current_coordinator gesetzt ist, kommen Werte aus dem Forecast."""
+
+    @pytest.fixture
+    def no_station_entity(self, forecast_coord):
+        return GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="test_entry",
+            model="nwp-v1-1h-2500m",
+            location_name="Test",
+            lon=16.37,
+        )
+
+    def _set_forecast(self, forecast_coord, **overrides):
+        dt = datetime.now(timezone.utc) + timedelta(hours=1)
+        entry = {"datetime": dt.isoformat(), "t2m": 20.0, "rh2m": 55.0,
+                 "u10m": 3.0, "v10m": 4.0, "rain_acc": 0.5}
+        entry.update(overrides)
+        forecast_coord.data = [entry]
+
+    def test_temperature_from_forecast(self, no_station_entity, forecast_coord):
+        self._set_forecast(forecast_coord, t2m=22.5)
+        assert no_station_entity.native_temperature == 22.5
+
+    def test_humidity_from_forecast(self, no_station_entity, forecast_coord):
+        self._set_forecast(forecast_coord, rh2m=70.0)
+        assert no_station_entity.humidity == 70.0
+
+    def test_wind_speed_from_nwp_vector(self, no_station_entity, forecast_coord):
+        """NWP: Windgeschwindigkeit aus u10m/v10m berechnen."""
+        self._set_forecast(forecast_coord, u10m=3.0, v10m=4.0)
+        assert no_station_entity.native_wind_speed == pytest.approx(5.0)
+
+    def test_wind_speed_from_nowcast_ff(self, forecast_coord):
+        """Nowcast: ff wird direkt übernommen."""
+        entity = GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="x", model="nowcast-v1-15min-1km",
+            location_name="Test", lon=16.0,
+        )
+        dt = datetime.now(timezone.utc) + timedelta(hours=1)
+        forecast_coord.data = [{"datetime": dt.isoformat(), "ff": 7.5}]
+        assert entity.native_wind_speed == pytest.approx(7.5)
+
+    def test_wind_bearing_from_nwp_vector(self, no_station_entity, forecast_coord):
+        """u10m=0, v10m=5 → atan2(0,5)=0 → bearing=180°."""
+        self._set_forecast(forecast_coord, u10m=0.0, v10m=5.0)
+        assert no_station_entity.wind_bearing == pytest.approx(180.0)
+
+    def test_precipitation_from_rain_acc(self, no_station_entity, forecast_coord):
+        self._set_forecast(forecast_coord, rain_acc=1.2)
+        assert no_station_entity.native_precipitation == pytest.approx(1.2)
+
+    def test_none_when_no_forecast_data(self, no_station_entity, forecast_coord):
+        forecast_coord.data = []
+        assert no_station_entity.native_temperature is None
+        assert no_station_entity.humidity is None
+        assert no_station_entity.native_wind_speed is None
+
+    def test_pressure_always_none_without_station(self, no_station_entity, forecast_coord):
+        """Luftdruck hat kein Forecast-Äquivalent."""
+        self._set_forecast(forecast_coord)
+        assert no_station_entity.native_pressure is None
+
+    def test_dew_point_always_none_without_station(self, no_station_entity, forecast_coord):
+        """Taupunkt hat kein Forecast-Äquivalent."""
+        self._set_forecast(forecast_coord)
+        assert no_station_entity.native_dew_point is None
+
+    def test_wind_gust_always_none_without_station(self, no_station_entity, forecast_coord):
+        """Böen haben kein Forecast-Äquivalent."""
+        self._set_forecast(forecast_coord)
+        assert no_station_entity.native_wind_gust_speed is None
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +451,30 @@ class TestBuildHourlyForecasts:
         forecast_coord.data = [_future_entry() | {"datetime": ts}]
 
         assert len(entity._build_hourly_forecasts()) == 1
+
+    def test_solar_irradiance_included_when_grad_present(self, entity, current_coord, forecast_coord):
+        """solar_irradiance erscheint im Forecast-Eintrag wenn grad vorhanden."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(grad=350.0)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert len(forecasts) == 1
+        assert forecasts[0]["solar_irradiance"] == pytest.approx(350.0)
+
+    def test_solar_irradiance_absent_when_grad_not_present(self, entity, current_coord, forecast_coord):
+        """solar_irradiance wird nicht gesetzt wenn grad fehlt (z. B. Nowcast)."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry()]  # kein grad-Key
+
+        forecasts = entity._build_hourly_forecasts()
+        assert "solar_irradiance" not in forecasts[0]
+
+    def test_solar_irradiance_rounded_to_one_decimal(self, entity, current_coord, forecast_coord):
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(grad=123.456)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0]["solar_irradiance"] == pytest.approx(123.5)
 
 
 # ---------------------------------------------------------------------------
