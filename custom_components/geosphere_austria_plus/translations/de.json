@@ -12,6 +12,7 @@
       "precipitation":    {"name": "Niederschlag"},
       "sunshine_duration":{"name": "Sonnenscheindauer"},
       "snow_height":      {"name": "Schneehöhe"},
+      "global_radiation": {"name": "Globalstrahlung"},
       "warning_level":    {"name": "Warnstufe"},
       "no2":              {"name": "Stickstoffdioxid"},
       "o3":               {"name": "Ozon"},

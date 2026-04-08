@@ -10,7 +10,7 @@ Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (C
 
 | Feature | Status |
 |---|---|
-| **11 TAWES-Sensoren** (Temperatur, Feuchte, Druck, Wind, …) | ✅ |
+| **12 TAWES-Sensoren** (Temperatur, Feuchte, Druck, Wind, Strahlung, …) | ✅ |
 | **Wetterbedingungen (condition)** | ✅ |
 | **Stündliche Vorhersage (hourly forecast, 48 h)** | ✅ |
 | **Tägliche Vorhersage (daily forecast, 7 Tage)** | ✅ |
@@ -21,7 +21,7 @@ Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (C
 
 ### TAWES-Sensoren
 
-Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfrage, die auch die aktuellen Wetterbedingungen liefert. Weil die Rohdaten damit ohnehin vorhanden sind, werden sie als **11 einzelne Sensor-Entitäten** direkt im Gerät exponiert, ohne einen einzigen zusätzlichen API-Call:
+Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfrage, die auch die aktuellen Wetterbedingungen liefert. Weil die Rohdaten damit ohnehin vorhanden sind, werden sie als **12 einzelne Sensor-Entitäten** direkt im Gerät exponiert, ohne einen einzigen zusätzlichen API-Call:
 
 | Sensor | Parameter | Einheit |
 |---|---|---|
@@ -36,6 +36,7 @@ Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfr
 | Precipitation | RR | mm |
 | Sunshine Duration | SO | s / 10 min |
 | Snow Height | SH | cm |
+| Global Radiation | GLOW | W/m² |
 
 Alle Sensoren teilen sich dasselbe Gerät (Wetterstation) mit der Wetterentität und stehen sofort in Automationen, Dashboards und dem Energiemanagement zur Verfügung.
 

@@ -64,7 +64,7 @@ AQI_BREAKPOINTS: dict[str, list[float]] = {
 
 # Aktuelle Messwerte (TAWES – 10-Minuten-Auflösung)
 TAWES_RESOURCE = "tawes-v1-10min"
-TAWES_PARAMS = "TL,TP,RF,DD,FF,FX,P,PRED,RR,SO,SH"
+TAWES_PARAMS = "TL,TP,RF,DD,FF,FX,P,PRED,RR,SO,SH,GLOW"
 
 # Vorhersagemodelle (gültige IDs – Bezeichnungen in den Übersetzungsdateien)
 FORECAST_MODELS = [

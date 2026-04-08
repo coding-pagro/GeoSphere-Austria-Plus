@@ -12,6 +12,7 @@
       "precipitation":    {"name": "Precipitation"},
       "sunshine_duration":{"name": "Sunshine Duration"},
       "snow_height":      {"name": "Snow Height"},
+      "global_radiation": {"name": "Global Radiation"},
       "warning_level":    {"name": "Warning Level"},
       "no2":              {"name": "Nitrogen Dioxide"},
       "o3":               {"name": "Ozone"},

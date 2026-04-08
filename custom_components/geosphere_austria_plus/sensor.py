@@ -16,6 +16,7 @@ from homeassistant.const import (
     CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     DEGREE,
     PERCENTAGE,
+    UnitOfIrradiance,
     UnitOfLength,
     UnitOfPressure,
     UnitOfSpeed,
@@ -142,6 +143,13 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfLength.CENTIMETERS,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:snowflake",
+    ),
+    TawesSensorDescription(
+        key="global_radiation",   translation_key="global_radiation",
+        param="GLOW",
+        native_unit_of_measurement=UnitOfIrradiance.WATTS_PER_SQUARE_METER,
+        device_class=SensorDeviceClass.IRRADIANCE,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
 )
 
