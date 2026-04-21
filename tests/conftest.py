@@ -65,6 +65,9 @@ class _MockDataUpdateCoordinator:
     async def async_request_refresh(self):
         pass
 
+    async def async_refresh(self):
+        pass
+
     def async_add_listener(self, func):
         return lambda: None
 
