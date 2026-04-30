@@ -712,3 +712,84 @@ class TestDeaccumulateGrad:
         assert result[0]["grad"] == pytest.approx(0.0)    # 0/3600
         assert result[1]["grad"] == pytest.approx(200.0)  # (720000-0)/3600
 
+
+class TestDeaccumulatePrecip:
+    """Tests für die NWP/Ensemble-Niederschlags-Deakkumulation (mm akkumuliert → mm/Zeitschritt)."""
+
+    def _entries(self, rain_values: list, snow_values: list | None = None) -> list[dict]:
+        if snow_values is None:
+            snow_values = [0.0] * len(rain_values)
+        return [
+            {"datetime": f"2024-06-01T{i:02d}:00:00Z", "rain_acc": r, "snow_acc": s}
+            for i, (r, s) in enumerate(zip(rain_values, snow_values))
+        ]
+
+    def test_first_entry_is_used_as_is(self):
+        """Erster Eintrag: Akkumulationswert direkt übernehmen (kein Vorgänger bekannt)."""
+        entries = self._entries([2.5])
+        GeoSphereApi._deaccumulate_precip(entries)
+        assert entries[0]["rain_acc"] == pytest.approx(2.5)
+
+    def test_subsequent_entries_use_delta(self):
+        """Folgeeinträge: Delta zum Vorgänger."""
+        entries = self._entries([0.0, 2.0, 5.0, 5.5])
+        GeoSphereApi._deaccumulate_precip(entries)
+        assert entries[0]["rain_acc"] == pytest.approx(0.0)
+        assert entries[1]["rain_acc"] == pytest.approx(2.0)   # 2.0 - 0.0
+        assert entries[2]["rain_acc"] == pytest.approx(3.0)   # 5.0 - 2.0
+        assert entries[3]["rain_acc"] == pytest.approx(0.5)   # 5.5 - 5.0
+
+    def test_negative_delta_clamped_to_zero(self):
+        """Modell-Reset: negatives Delta (Akkumulator-Reset) wird auf 0 geklemmt."""
+        entries = self._entries([5.0, 2.0])
+        GeoSphereApi._deaccumulate_precip(entries)
+        assert entries[0]["rain_acc"] == pytest.approx(5.0)
+        assert entries[1]["rain_acc"] == pytest.approx(0.0)
+
+    def test_rain_and_snow_tracked_independently(self):
+        """rain_acc und snow_acc werden unabhängig voneinander de-akkumuliert."""
+        entries = self._entries([0.0, 3.0], snow_values=[0.0, 1.5])
+        GeoSphereApi._deaccumulate_precip(entries)
+        assert entries[1]["rain_acc"] == pytest.approx(3.0)
+        assert entries[1]["snow_acc"] == pytest.approx(1.5)
+
+    def test_none_rain_acc_resets_accumulator(self):
+        """None-Einträge bleiben None; Akkumulator wird danach zurückgesetzt."""
+        entries = [
+            {"datetime": "2024-06-01T00:00:00Z", "rain_acc": 2.0, "snow_acc": 0.0},
+            {"datetime": "2024-06-01T01:00:00Z", "rain_acc": None, "snow_acc": 0.0},
+            {"datetime": "2024-06-01T02:00:00Z", "rain_acc": 4.0, "snow_acc": 0.0},
+        ]
+        GeoSphereApi._deaccumulate_precip(entries)
+        assert entries[0]["rain_acc"] == pytest.approx(2.0)
+        assert entries[1]["rain_acc"] is None
+        assert entries[2]["rain_acc"] == pytest.approx(4.0)   # wie Ersteintrag nach Reset
+
+    def test_modifies_entries_in_place(self):
+        """_deaccumulate_precip gibt None zurück und ändert die Liste direkt."""
+        entries = self._entries([1.0, 3.0])
+        result = GeoSphereApi._deaccumulate_precip(entries)
+        assert result is None
+        assert entries[1]["rain_acc"] == pytest.approx(2.0)
+
+    def test_nwp_forecast_deaccumulates_precipitation(self):
+        """get_forecast de-akkumuliert rain_acc/snow_acc für NWP-Modelle."""
+        payload = _make_forecast_payload(
+            ["2024-06-01T06:00:00Z", "2024-06-01T07:00:00Z", "2024-06-01T08:00:00Z"],
+            t2m=[15.0, 15.0, 15.0],
+            rain_acc=[0.0, 2.0, 5.0],
+            snow_acc=[0.0, 0.0, 1.0],
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+        api = GeoSphereApi(session)
+
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
+        )
+        assert result[0]["rain_acc"] == pytest.approx(0.0)
+        assert result[1]["rain_acc"] == pytest.approx(2.0)   # 2.0 - 0.0
+        assert result[2]["rain_acc"] == pytest.approx(3.0)   # 5.0 - 2.0
+        assert result[2]["snow_acc"] == pytest.approx(1.0)   # 1.0 - 0.0
+

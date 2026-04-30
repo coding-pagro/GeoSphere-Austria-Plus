@@ -292,7 +292,7 @@ class GeoSphereWeatherEntity(
         entry = self._first_forecast_entry
         if entry is None:
             return None
-        # Nowcast: rr (Niederschlagsrate mm/15min); NWP/Ensemble: rain_acc (akkumuliert)
+        # Nowcast: rr (Niederschlagsrate mm/15min); NWP/Ensemble: rain_acc (mm/Zeitschritt, bereits de-akkumuliert)
         return entry.get("rr") or entry.get("rain_acc")
 
     # ------------------------------------------------------------------
@@ -479,17 +479,10 @@ class GeoSphereWeatherEntity(
 
             t_max = max(temps) if temps else None
             t_min = min(temps) if temps else None
-            # rain_acc/snow_acc sind Akkumulationswerte. Summe der positiven Deltas
-            # ergibt die Tagessumme – robust gegen Modell-Lauf-Resets (negatives
-            # Delta = Reset → wird als 0 gezählt).
-            rain_total = sum(
-                max(0.0, rain_list[i + 1] - rain_list[i])
-                for i in range(len(rain_list) - 1)
-            ) if len(rain_list) > 1 else 0.0
-            snow_total = sum(
-                max(0.0, snow_list[i + 1] - snow_list[i])
-                for i in range(len(snow_list) - 1)
-            ) if len(snow_list) > 1 else 0.0
+            # rain_acc/snow_acc sind nach _deaccumulate_precip in api.py bereits
+            # Intervallwerte (mm/Zeitschritt) → direkte Summe ergibt Tagessumme.
+            rain_total = sum(max(0.0, r) for r in rain_list)
+            snow_total = sum(max(0.0, s) for s in snow_list)
             tcc_avg = sum(tcc_list) / len(tcc_list) if tcc_list else None
             wind_speeds = [
                 math.sqrt((e.get("u10m") or 0.0)**2 + (e.get("v10m") or 0.0)**2)
