@@ -197,6 +197,32 @@ class GeoSphereApi:
             prev = raw
 
     @staticmethod
+    def _deaccumulate_precip(entries: list[dict]) -> None:
+        """NWP/Ensemble-Niederschlag von akkumulierten mm in mm je Zeitschritt umrechnen.
+
+        Die API liefert rain_acc/snow_acc als Summe seit Modellstart (mm).
+        Das Delta aufeinanderfolgender Zeitschritte ergibt den Intervallniederschlag.
+        Negative Deltas (Modell-Reset) werden als 0 behandelt. Ändert die Einträge in-place.
+        Der erste Eintrag enthält die Akkumulation ab Modellstart und wird direkt übernommen.
+        """
+        prev_rain: float | None = None
+        prev_snow: float | None = None
+        for entry in entries:
+            raw_rain = entry.get("rain_acc")
+            if raw_rain is not None:
+                entry["rain_acc"] = round(max(0.0, raw_rain if prev_rain is None else raw_rain - prev_rain), 2)
+                prev_rain = raw_rain
+            else:
+                prev_rain = None
+
+            raw_snow = entry.get("snow_acc")
+            if raw_snow is not None:
+                entry["snow_acc"] = round(max(0.0, raw_snow if prev_snow is None else raw_snow - prev_snow), 2)
+                prev_snow = raw_snow
+            else:
+                prev_snow = None
+
+    @staticmethod
     def _extract_missing_params(detail: str) -> set[str]:
         """Extrahiert Parameternamen aus einer API-400-Fehlermeldung."""
         match = re.search(r"\{([^}]+)\}", detail)
@@ -295,11 +321,15 @@ class GeoSphereApi:
             result = self._parse_forecast_geojson(data)
             if "ensemble" in model:
                 result = self._normalize_ensemble_params(result)
+                # Ensemble rain_p50/snow_p50 sind akkumuliert → in mm je Zeitschritt umrechnen
+                self._deaccumulate_precip(result)
             elif "nowcast" in model:
+                # Nowcast liefert rr bereits als Intervallrate → keine De-Akkumulation nötig
                 result = self._normalize_nowcast_params(result)
             else:
-                # NWP: grad ist akkumuliert in Ws/m² → in mittlere W/m² je Zeitschritt umrechnen
+                # NWP: grad und rain_acc/snow_acc sind akkumuliert seit Modellstart
                 self._deaccumulate_grad(result)
+                self._deaccumulate_precip(result)
             return result
 
         raise GeoSphereApiError("Fehler beim Abrufen der Vorhersage")

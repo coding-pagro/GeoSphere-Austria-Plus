@@ -489,9 +489,9 @@ class TestBuildDailyForecasts:
         snow_total: float = 0.0,
         count: int = 4,
     ) -> list:
-        """Entries where rain_acc/snow_acc increase monotonically (accumulated style).
+        """Entries with per-interval rain_acc/snow_acc (already de-accumulated by api.py).
 
-        max(rain_acc) - min(rain_acc) == rain_total after the fix.
+        Each entry carries rain_total/count mm so that sum == rain_total.
         """
         base_dt = (
             datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -501,8 +501,8 @@ class TestBuildDailyForecasts:
             {
                 "datetime": (base_dt + timedelta(hours=i)).isoformat(),
                 "t2m": 10.0,
-                "rain_acc": rain_total * i / max(count - 1, 1),
-                "snow_acc": snow_total * i / max(count - 1, 1),
+                "rain_acc": rain_total / count,
+                "snow_acc": snow_total / count,
                 "rh2m": 65.0,
                 "u10m": 2.0,
                 "v10m": 2.0,
@@ -553,29 +553,29 @@ class TestBuildDailyForecasts:
 
     def test_rain_above_2mm_gives_rainy(self, entity, current_coord, forecast_coord):
         current_coord.data = {}
-        # Accumulated: 0.0 → 4.8 mm, range = 4.8 mm → rainy
+        # 4 Einträge à 1.2 mm → Tagessumme 4.8 mm → rainy
         forecast_coord.data = self._acc_entries(day_offset=1, rain_total=4.8)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "rainy"
 
     def test_rain_above_10mm_gives_pouring(self, entity, current_coord, forecast_coord):
         current_coord.data = {}
-        # Accumulated: 0.0 → 12.0 mm, range = 12.0 mm → pouring
+        # 4 Einträge à 3.0 mm → Tagessumme 12.0 mm → pouring
         forecast_coord.data = self._acc_entries(day_offset=1, rain_total=12.0)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "pouring"
 
     def test_snow_above_2mm_gives_snowy(self, entity, current_coord, forecast_coord):
         current_coord.data = {}
-        # Accumulated: 0.0 → 4.8 mm snow, range = 4.8 mm → snowy
+        # 4 Einträge à 1.2 mm Schnee → Tagessumme 4.8 mm → snowy
         forecast_coord.data = self._acc_entries(day_offset=1, snow_total=4.8)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "snowy"
 
-    def test_precipitation_is_range_not_sum(self, entity, current_coord, forecast_coord):
-        """native_precipitation muss max-min sein, nicht die Summe der akkumulierten Werte."""
+    def test_precipitation_is_sum_of_intervals(self, entity, current_coord, forecast_coord):
+        """native_precipitation muss die Summe der Intervallwerte sein (bereits de-akkumuliert)."""
         current_coord.data = {}
-        # Accumulated: [0.0, 3.0, 6.0, 9.0] → range = 9.0, sum = 18.0
+        # 4 Einträge à 2.25 mm → Summe = 9.0 mm
         forecast_coord.data = self._acc_entries(day_offset=1, rain_total=9.0, count=4)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].native_precipitation == pytest.approx(9.0)
