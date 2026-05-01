@@ -90,8 +90,10 @@ ENSEMBLE_PARAMS = "t2m_p50,rain_p50,snow_p50,sundur_p50,grad_p50"
 
 # Normalisierung: Ensemble-Parameternamen → NWP-Parameternamen
 # Ermöglicht identische Verarbeitung in weather.py
-# Hinweis: grad_p50 (W/m²) ist ein Momentanwert, NWP grad (Ws/m²) wird in
-# api.py per Delta/3600 in W/m² umgerechnet – danach identisches Format.
+# Hinweis: Alle Ensemble-p50-Werte (rain_p50, snow_p50, grad_p50) sind
+# Momentanwerte (mm bzw. W/m² je Zeitschritt), keine Akkumulationen.
+# NWP grad (Ws/m²) wird in api.py per Delta/3600 in W/m² umgerechnet –
+# danach identisches Format für grad.
 ENSEMBLE_PARAM_MAP = {
     "t2m_p50":    "t2m",
     "rain_p50":   "rain_acc",
