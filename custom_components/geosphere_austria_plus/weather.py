@@ -431,6 +431,9 @@ class GeoSphereWeatherEntity(
     def _condition_from_forecast(self) -> str | None:
         """Aktuellen Zustand aus dem ersten verfügbaren Vorhersagepunkt ableiten."""
         now = datetime.now(timezone.utc)
+        # sy (symbol code) is only available in NWP model output; Ensemble and
+        # Nowcast do not provide it, so we only pass it for NWP entries.
+        is_nwp = "nwp" in self._model
         for entry in self._forecast_raw:
             ts_str = entry.get("datetime")
             if not ts_str:
@@ -448,7 +451,8 @@ class GeoSphereWeatherEntity(
             v10 = entry.get("v10m") or 0.0
             wind_speed = math.sqrt(u10**2 + v10**2)
             is_day = self._is_daytime()
-            return nwp_to_condition(tcc, rain, snow, wind_speed, is_day, entry.get("sy"))
+            sy = entry.get("sy") if is_nwp else None
+            return nwp_to_condition(tcc, rain, snow, wind_speed, is_day, sy)
         return None
 
     def _is_daytime(self) -> bool:
@@ -499,7 +503,9 @@ class GeoSphereWeatherEntity(
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
 
             is_day = self._is_dt_daytime(dt)
-            cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day, entry.get("sy"))
+            # sy (symbol code) is only present in NWP model output.
+            sy = entry.get("sy") if "nwp" in self._model else None
+            cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day, sy)
             if cond is None:
                 cond = self.condition
 
@@ -570,7 +576,8 @@ class GeoSphereWeatherEntity(
 
             # If any hourly entry has a thunderstorm symbol code, the whole
             # day is classified as lightning-rainy (highest priority).
-            has_thunderstorm = any(
+            # sy is only present in NWP model output; skip for Ensemble/Nowcast.
+            has_thunderstorm = "nwp" in self._model and any(
                 int(e["sy"]) in range(26, 33)
                 for e in entries
                 if e.get("sy") is not None
