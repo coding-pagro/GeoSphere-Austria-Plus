@@ -81,7 +81,7 @@ FORECAST_MODEL_LABELS = {
 }
 
 # Vorhersageparameter (NWP / Nowcast)
-NWP_PARAMS = "t2m,rh2m,u10m,v10m,rain_acc,snow_acc,tcc,grad"
+NWP_PARAMS = "t2m,rh2m,u10m,v10m,rain_acc,snow_acc,tcc,grad,sy"
 NOWCAST_PARAMS = "t2m,rh2m,ff,dd,rr,pt"
 
 # Vorhersageparameter (Ensemble – Median-Perzentile, andere Namenskonvention)

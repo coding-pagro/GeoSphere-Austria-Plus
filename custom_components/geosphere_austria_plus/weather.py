@@ -52,14 +52,92 @@ _CLOUD_FULL = 0.875            # Als bewölkt gilt > 87.5 % SO-Ausfall
 _SUN_SECONDS_MAX = 600         # SO max. 600 s Sonnenschein je 10-Minuten-Intervall
 
 
+# Mapping from GeoSphere symbol codes (sy, 1–32) to HA weather conditions.
+# Source: https://github.com/Geosphere-Austria/dataset-api-docs/issues/30#issuecomment-2042539848
+_SY_CONDITION_MAP: dict[int, str] = {
+    # Codes 1–2: Cloudless / Fair
+    1: "sunny",
+    2: "sunny",
+    # Codes 3–5: Cloudy variations
+    3: "partlycloudy",
+    4: "cloudy",
+    5: "cloudy",
+    # Codes 6–7: Fog types
+    6: "fog",
+    7: "fog",
+    # Codes 8–10: Rain (increasing intensity)
+    8: "rainy",
+    9: "rainy",
+    10: "pouring",
+    # Codes 11–13: Rain-snow mix (continuous)
+    11: "snowy-rainy",
+    12: "snowy-rainy",
+    13: "snowy-rainy",
+    # Codes 14–16: Snow (increasing intensity)
+    14: "snowy",
+    15: "snowy",
+    16: "snowy",
+    # Codes 17–19: Showers (rain)
+    17: "rainy",
+    18: "rainy",
+    19: "pouring",
+    # Codes 20–22: Snow-rain showers
+    20: "snowy-rainy",
+    21: "snowy-rainy",
+    22: "snowy-rainy",
+    # Codes 23–25: Snow showers
+    23: "snowy",
+    24: "snowy",
+    25: "snowy",
+    # Codes 26–32: Thunderstorms (all variants)
+    26: "lightning-rainy",
+    27: "lightning-rainy",
+    28: "lightning-rainy",
+    29: "lightning-rainy",
+    30: "lightning-rainy",
+    31: "lightning-rainy",
+    32: "lightning-rainy",
+}
+
+# Symbol codes that indicate night-time variants of clear/fair conditions.
+_SY_NIGHT_CODES = frozenset({1, 2})
+
+
+def sy_to_condition(sy: int | float | None, is_day: bool) -> str | None:
+    """Mappe GeoSphere-Symbolcode (sy, 1–32) auf HA-Wetterbedingung.
+
+    Gibt None zurück wenn sy nicht bekannt ist.
+    Für klare Bedingungen (Codes 1–2) wird is_day berücksichtigt.
+    """
+    if sy is None:
+        return None
+    code = int(sy)
+    condition = _SY_CONDITION_MAP.get(code)
+    if condition is None:
+        return None
+    if code in _SY_NIGHT_CODES and not is_day:
+        return "clear-night"
+    return condition
+
+
 def nwp_to_condition(
     tcc: float | None,
     rain_mm: float,
     snow_mm: float,
     wind_ms: float,
     is_day: bool,
+    sy: int | float | None = None,
 ) -> str | None:
-    """Leite HA-Wetterbedingung aus NWP-Parametern ab."""
+    """Leite HA-Wetterbedingung aus NWP-Parametern ab.
+
+    Wenn der GeoSphere-Symbolcode (sy) verfügbar ist, wird er bevorzugt,
+    da er vom Modell direkt klassifizierte Bedingungen enthält (inkl. Gewitter).
+    Abgeleitete Bedingungen aus tcc/rain/snow dienen als Rückfall.
+    """
+    sy_cond = sy_to_condition(sy, is_day)
+    if sy_cond is not None:
+        return sy_cond
+
     if snow_mm > 0.1 and rain_mm > 0.1:
         return "snowy-rainy"
     if snow_mm > 0.1:
@@ -370,7 +448,7 @@ class GeoSphereWeatherEntity(
             v10 = entry.get("v10m") or 0.0
             wind_speed = math.sqrt(u10**2 + v10**2)
             is_day = self._is_daytime()
-            return nwp_to_condition(tcc, rain, snow, wind_speed, is_day)
+            return nwp_to_condition(tcc, rain, snow, wind_speed, is_day, entry.get("sy"))
         return None
 
     def _is_daytime(self) -> bool:
@@ -421,7 +499,7 @@ class GeoSphereWeatherEntity(
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
 
             is_day = self._is_dt_daytime(dt)
-            cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day)
+            cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day, entry.get("sy"))
             if cond is None:
                 cond = self.condition
 
@@ -490,19 +568,29 @@ class GeoSphereWeatherEntity(
             ]
             wind_max = max(wind_speeds) if wind_speeds else 0.0
 
-            cond = nwp_to_condition(
-                tcc_avg,
-                rain_total / max(len(entries), 1),
-                snow_total / max(len(entries), 1),
-                wind_max,
-                True,
+            # If any hourly entry has a thunderstorm symbol code, the whole
+            # day is classified as lightning-rainy (highest priority).
+            has_thunderstorm = any(
+                int(e["sy"]) in range(26, 33)
+                for e in entries
+                if e.get("sy") is not None
             )
-            if rain_total > 2.0:
-                cond = "rainy"
-            if rain_total > 10.0:
-                cond = "pouring"
-            if snow_total > 2.0:
-                cond = "snowy"
+            if has_thunderstorm:
+                cond = "lightning-rainy"
+            else:
+                cond = nwp_to_condition(
+                    tcc_avg,
+                    rain_total / max(len(entries), 1),
+                    snow_total / max(len(entries), 1),
+                    wind_max,
+                    True,
+                )
+                if rain_total > 2.0:
+                    cond = "rainy"
+                if rain_total > 10.0:
+                    cond = "pouring"
+                if snow_total > 2.0:
+                    cond = "snowy"
 
             dt_day = datetime.strptime(day_key, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             forecasts.append(
