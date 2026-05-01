@@ -321,8 +321,8 @@ class GeoSphereApi:
             result = self._parse_forecast_geojson(data)
             if "ensemble" in model:
                 result = self._normalize_ensemble_params(result)
-                # rain_p50/snow_p50 sind Momentanwerte (mm/Zeitschritt), keine
-                # Akkumulationen → direkt übernehmen, kein _deaccumulate_precip.
+                # rain_p50/snow_p50 sind Periodensummen (mm/Periode, 1h Fenster),
+                # keine Akkumulationen seit Modellstart → direkt übernehmen, kein _deaccumulate_precip.
             elif "nowcast" in model:
                 # Nowcast liefert rr bereits als Intervallrate → keine De-Akkumulation nötig
                 result = self._normalize_nowcast_params(result)

@@ -623,16 +623,16 @@ class TestBuildDailyForecasts:
 
 
 # ---------------------------------------------------------------------------
-# _build_daily_forecasts – Ensemble model (per-step precipitation)
+# _build_daily_forecasts – Ensemble model (per-period precipitation)
 # ---------------------------------------------------------------------------
 
 class TestBuildDailyForecastsEnsemble:
-    """Verify that daily aggregation sums per-step ensemble values directly.
+    """Verify that daily aggregation sums per-period ensemble values directly.
 
     After api.py normalisation, ensemble entries carry rain_acc/snow_acc as
-    per-timestep millimetres (not accumulated totals). The daily forecast must
-    sum them directly — never compute deltas — even when values are
-    non-monotonic across hours.
+    per-period millimetres (total for the 1h window, not cumulative since model
+    start). The daily forecast must sum them directly — never compute deltas —
+    even when values are non-monotonic across hours.
     """
 
     @pytest.fixture
@@ -652,7 +652,7 @@ class TestBuildDailyForecastsEnsemble:
         rain_values: list[float],
         snow_values: list[float] | None = None,
     ) -> list[dict]:
-        """Generate hourly ensemble entries for one day with explicit per-step values."""
+        """Generate hourly ensemble entries for one day with explicit per-period values."""
         base_dt = (
             datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             + timedelta(days=day_offset)
@@ -676,10 +676,10 @@ class TestBuildDailyForecastsEnsemble:
     def test_ensemble_daily_rain_is_direct_sum_not_delta(
         self, ensemble_entity, current_coord, forecast_coord
     ):
-        """Bug 3.3: daily precipitation sums per-step values, not monotonic deltas.
+        """Bug 3.3: daily precipitation sums per-period values, not monotonic deltas.
 
-        Non-monotonic per-step values (e.g. 0.5, 1.2, 0.3) must be summed
-        directly (=2.0), not delta-computed as if they were accumulated totals.
+        Non-monotonic per-period values (e.g. 0.5, 1.2, 0.3) must be summed
+        directly (=2.0), not delta-computed as if they were cumulative since model start.
         """
         current_coord.data = {}
         rain_steps = [0.5, 1.2, 0.3, 0.0]
@@ -694,7 +694,7 @@ class TestBuildDailyForecastsEnsemble:
     def test_ensemble_daily_snow_is_direct_sum(
         self, ensemble_entity, current_coord, forecast_coord
     ):
-        """Bug 3.3: per-step snow values are summed, not delta-computed."""
+        """Bug 3.3: per-period snow values are summed, not delta-computed."""
         current_coord.data = {}
         snow_steps = [2.0, 0.5, 1.8, 0.0]
         forecast_coord.data = self._ensemble_day_entries(
@@ -710,7 +710,7 @@ class TestBuildDailyForecastsEnsemble:
     def test_ensemble_daily_rain_and_snow_both_summed(
         self, ensemble_entity, current_coord, forecast_coord
     ):
-        """Bug 3.3: rain and snow per-step values both contribute to daily total."""
+        """Bug 3.3: rain and snow per-period values both contribute to daily total."""
         current_coord.data = {}
         rain_steps = [0.3, 0.7, 0.0, 0.5]
         snow_steps = [0.0, 0.2, 1.0, 0.3]
@@ -739,7 +739,7 @@ class TestBuildDailyForecastsEnsemble:
     def test_ensemble_daily_multiple_days_each_summed_independently(
         self, ensemble_entity, current_coord, forecast_coord
     ):
-        """Per-step values for each day are summed independently."""
+        """Per-period values for each day are summed independently."""
         current_coord.data = {}
         day1_rain = [1.0, 0.5, 0.0, 0.5]  # total 2.0
         day2_rain = [0.0, 0.2, 0.8, 0.0]  # total 1.0

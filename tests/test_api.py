@@ -399,12 +399,12 @@ class TestGetForecast:
         assert result[0]["tcc"] == 1.0
 
     async def test_ensemble_precip_not_deaccumulated(self):
-        """Bug 3.3: rain_p50/snow_p50 are per-step values, not accumulated totals.
+        """Bug 3.3: rain_p50/snow_p50 are per-period accumulations, not cumulative totals.
 
         _deaccumulate_precip must NOT be applied to ensemble output.
-        Verify that multi-step values are returned as-is, not delta-computed.
+        Verify that per-period values are returned as-is, not delta-computed.
         """
-        # Simulate three hourly values with non-monotonic per-step rainfall.
+        # Simulate three hourly values with non-monotonic per-period rainfall.
         # If de-accumulation were applied, entry[1] would give delta(1.2-0.5)=0.7
         # and entry[2] would clamp delta(0.3-1.2)=-0.9 → 0.0. Both are wrong.
         payload = _make_forecast_payload(
@@ -423,7 +423,7 @@ class TestGetForecast:
         assert result[2]["rain_acc"] == pytest.approx(0.3)
 
     async def test_ensemble_snow_not_deaccumulated(self):
-        """Bug 3.3: snow_p50 per-step values are preserved without delta computation."""
+        """Bug 3.3: snow_p50 per-period accumulations are preserved without delta computation."""
         payload = _make_forecast_payload(
             ["2024-06-01T00:00:00Z", "2024-06-01T01:00:00Z", "2024-06-01T02:00:00Z"],
             t2m_p50=[0.0, -1.0, -2.0],

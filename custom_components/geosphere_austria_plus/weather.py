@@ -481,7 +481,7 @@ class GeoSphereWeatherEntity(
             t_min = min(temps) if temps else None
             # rain_acc/snow_acc sind immer Intervallwerte (mm/Zeitschritt):
             # NWP: nach _deaccumulate_precip in api.py de-akkumuliert.
-            # Ensemble: rain_p50/snow_p50 sind direkte Momentanwerte (kein Delta nötig).
+            # Ensemble: rain_p50/snow_p50 sind Periodensummen (mm/Periode, kein Delta nötig).
             # Direkte Summe ergibt in beiden Fällen die korrekte Tagessumme.
             rain_total = sum(max(0.0, r) for r in rain_list)
             snow_total = sum(max(0.0, s) for s in snow_list)
