@@ -416,9 +416,16 @@ class GeoSphereWeatherEntity(
             rh = entry.get("rh2m")
             u10 = entry.get("u10m") or 0.0
             v10 = entry.get("v10m") or 0.0
+            ugust = entry.get("ugust")
+            vgust = entry.get("vgust")
             tcc = entry.get("tcc")
             wind_speed = math.sqrt(u10**2 + v10**2)
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
+            wind_gust = (
+                math.sqrt(ugust**2 + vgust**2)
+                if ugust is not None and vgust is not None
+                else None
+            )
 
             is_day = self._is_dt_daytime(dt)
             cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day)
@@ -433,6 +440,7 @@ class GeoSphereWeatherEntity(
                 humidity=rh,
                 native_wind_speed=wind_speed,
                 wind_bearing=wind_bearing,
+                native_wind_gust_speed=wind_gust,
                 is_daytime=is_day,
             )
             grad = entry.get("grad")
@@ -489,6 +497,12 @@ class GeoSphereWeatherEntity(
                 for e in entries
             ]
             wind_max = max(wind_speeds) if wind_speeds else 0.0
+            gust_speeds = [
+                math.sqrt(e["ugust"] ** 2 + e["vgust"] ** 2)
+                for e in entries
+                if e.get("ugust") is not None and e.get("vgust") is not None
+            ]
+            gust_max = max(gust_speeds) if gust_speeds else None
 
             cond = nwp_to_condition(
                 tcc_avg,
@@ -514,6 +528,7 @@ class GeoSphereWeatherEntity(
                     native_precipitation=rain_total,
                     humidity=sum(rh_list) / len(rh_list) if rh_list else None,
                     native_wind_speed=wind_max,
+                    native_wind_gust_speed=gust_max,
                     is_daytime=True,
                 )
             )
