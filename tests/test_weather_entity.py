@@ -271,6 +271,11 @@ class TestForecastFallbackProperties:
         self._set_forecast(forecast_coord, rain_acc=1.2)
         assert no_station_entity.native_precipitation == pytest.approx(1.2)
 
+    def test_snow_only_native_precipitation_from_forecast(self, no_station_entity, forecast_coord):
+        """Bug 3.1: snow_acc alone must appear in entity-level native_precipitation when rain is zero."""
+        self._set_forecast(forecast_coord, rain_acc=0.0, snow_acc=0.8)
+        assert no_station_entity.native_precipitation == pytest.approx(0.8)
+
     def test_none_when_no_forecast_data(self, no_station_entity, forecast_coord):
         forecast_coord.data = []
         assert no_station_entity.native_temperature is None
@@ -595,6 +600,14 @@ class TestBuildDailyForecasts:
         forecast_coord.data = self._acc_entries(day_offset=1, snow_total=4.8)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "snowy"
+
+    def test_rain_and_snow_above_2mm_gives_snowy_rainy(self, entity, current_coord, forecast_coord):
+        """Bug 3.3: both rain and snow above 2 mm threshold must produce snowy-rainy."""
+        current_coord.data = {}
+        # rain_total=4.8 mm, snow_total=4.8 mm → beide > 2.0 mm → snowy-rainy
+        forecast_coord.data = self._acc_entries(day_offset=1, rain_total=4.8, snow_total=4.8)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "snowy-rainy"
 
     def test_precipitation_is_sum_of_intervals(self, entity, current_coord, forecast_coord):
         """native_precipitation muss die Summe der Intervallwerte sein (bereits de-akkumuliert)."""

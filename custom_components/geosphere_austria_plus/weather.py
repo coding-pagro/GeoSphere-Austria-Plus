@@ -292,8 +292,14 @@ class GeoSphereWeatherEntity(
         entry = self._first_forecast_entry
         if entry is None:
             return None
-        # Nowcast: rr (Niederschlagsrate mm/15min); NWP/Ensemble: rain_acc (mm/Zeitschritt, bereits de-akkumuliert)
-        return entry.get("rr") or entry.get("rain_acc")
+        # Nowcast: rr (Niederschlagsrate mm/15min); NWP/Ensemble: rain_acc + snow_acc (mm/Zeitschritt, bereits de-akkumuliert)
+        if "rr" in entry:
+            return entry["rr"]
+        rain = entry.get("rain_acc") or 0.0
+        snow = entry.get("snow_acc") or 0.0
+        if rain == 0.0 and snow == 0.0:
+            return None
+        return rain + snow
 
     # ------------------------------------------------------------------
     # Condition – aus TAWES abgeleitet wenn vorhanden, sonst aus Forecast
@@ -497,11 +503,13 @@ class GeoSphereWeatherEntity(
                 wind_max,
                 True,
             )
-            if rain_total > 2.0:
-                cond = "rainy"
-            if rain_total > 10.0:
+            if rain_total > 2.0 and snow_total > 2.0:
+                cond = "snowy-rainy"
+            elif rain_total > 10.0:
                 cond = "pouring"
-            if snow_total > 2.0:
+            elif rain_total > 2.0:
+                cond = "rainy"
+            elif snow_total > 2.0:
                 cond = "snowy"
 
             dt_day = datetime.strptime(day_key, "%Y-%m-%d").replace(tzinfo=timezone.utc)
