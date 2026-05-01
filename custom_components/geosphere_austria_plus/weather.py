@@ -421,11 +421,12 @@ class GeoSphereWeatherEntity(
             tcc = entry.get("tcc")
             wind_speed = math.sqrt(u10**2 + v10**2)
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
-            wind_gust = (
-                math.sqrt(ugust**2 + vgust**2)
-                if ugust is not None and vgust is not None
-                else None
-            )
+            if ugust is not None and vgust is not None:
+                # NWP/Ensemble: Böe aus Windvektorkomponenten berechnen
+                wind_gust: float | None = math.sqrt(ugust**2 + vgust**2)
+            else:
+                # Nowcast: fx ist bereits eine skalare Böengeschwindigkeit
+                wind_gust = entry.get("wind_gust_speed")
 
             is_day = self._is_dt_daytime(dt)
             cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day)
@@ -495,12 +496,19 @@ class GeoSphereWeatherEntity(
             wind_speeds = [
                 math.sqrt((e.get("u10m") or 0.0)**2 + (e.get("v10m") or 0.0)**2)
                 for e in entries
+                if e.get("u10m") is not None or e.get("v10m") is not None
             ]
-            wind_max = max(wind_speeds) if wind_speeds else 0.0
+            wind_max: float | None = max(wind_speeds) if wind_speeds else None
             gust_speeds = [
                 math.sqrt(e["ugust"] ** 2 + e["vgust"] ** 2)
                 for e in entries
                 if e.get("ugust") is not None and e.get("vgust") is not None
+            ]
+            # For Nowcast entries that carry wind_gust_speed directly
+            gust_speeds += [
+                e["wind_gust_speed"]
+                for e in entries
+                if e.get("wind_gust_speed") is not None
             ]
             gust_max = max(gust_speeds) if gust_speeds else None
 
@@ -508,7 +516,7 @@ class GeoSphereWeatherEntity(
                 tcc_avg,
                 rain_total / max(len(entries), 1),
                 snow_total / max(len(entries), 1),
-                wind_max,
+                wind_max or 0.0,
                 True,
             )
             if rain_total > 2.0:

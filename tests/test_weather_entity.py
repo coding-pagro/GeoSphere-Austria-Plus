@@ -657,6 +657,39 @@ class TestHourlyForecastWindGust:
         assert forecasts[0].native_wind_speed == pytest.approx(1.0)
         assert forecasts[0].native_wind_gust_speed == pytest.approx(6.0)
 
+    def test_wind_gust_from_nowcast_fx(self, current_coord, forecast_coord):
+        """Nowcast: fx is mapped to wind_gust_speed directly (scalar, no components)."""
+        nowcast_entity = GeoSphereWeatherEntity(
+            current_coordinator=current_coord,
+            forecast_coordinator=forecast_coord,
+            entry_id="test_entry",
+            model="nowcast-v1-15min-1km",
+            location_name="Test",
+            lon=16.37,
+        )
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(wind_gust_speed=9.5)]
+
+        forecasts = nowcast_entity._build_hourly_forecasts()
+        assert len(forecasts) == 1
+        assert forecasts[0].native_wind_gust_speed == pytest.approx(9.5)
+
+    def test_wind_gust_none_for_nowcast_without_fx(self, current_coord, forecast_coord):
+        """Nowcast entry without wind_gust_speed key → native_wind_gust_speed is None."""
+        nowcast_entity = GeoSphereWeatherEntity(
+            current_coordinator=current_coord,
+            forecast_coordinator=forecast_coord,
+            entry_id="test_entry",
+            model="nowcast-v1-15min-1km",
+            location_name="Test",
+            lon=16.37,
+        )
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry()]  # no gust keys at all
+
+        forecasts = nowcast_entity._build_hourly_forecasts()
+        assert forecasts[0].native_wind_gust_speed is None
+
 
 # ---------------------------------------------------------------------------
 # Wind gust in daily forecasts (max gust aggregation)
@@ -766,6 +799,55 @@ class TestDailyForecastWindGust:
 
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].native_wind_gust_speed == pytest.approx(5.0)
+
+    def test_daily_gust_from_nowcast_wind_gust_speed(self, entity, current_coord, forecast_coord):
+        """Entries with wind_gust_speed (Nowcast) contribute to daily gust aggregation."""
+        current_coord.data = {}
+        base_dt = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        entries = [
+            {
+                "datetime": (base_dt + timedelta(hours=i)).isoformat(),
+                "t2m": 10.0,
+                "rain_acc": 0.0,
+                "snow_acc": 0.0,
+                "rh2m": 65.0,
+                "u10m": 1.0,
+                "v10m": 0.0,
+                "tcc": None,
+                "wind_gust_speed": g,
+            }
+            for i, g in enumerate([7.0, 12.0, 9.0])
+        ]
+        forecast_coord.data = entries
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_wind_gust_speed == pytest.approx(12.0)
+
+    def test_daily_wind_max_none_when_no_wind_data(self, entity, current_coord, forecast_coord):
+        """native_wind_speed is None for a day where all entries lack wind vector data."""
+        current_coord.data = {}
+        base_dt = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        entries = [
+            {
+                "datetime": (base_dt + timedelta(hours=i)).isoformat(),
+                "t2m": 10.0,
+                "rain_acc": 0.0,
+                "snow_acc": 0.0,
+                "tcc": 0.5,
+                # no u10m / v10m
+            }
+            for i in range(3)
+        ]
+        forecast_coord.data = entries
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_wind_speed is None
 
 
 # ---------------------------------------------------------------------------

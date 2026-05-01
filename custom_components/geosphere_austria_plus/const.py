@@ -82,7 +82,7 @@ FORECAST_MODEL_LABELS = {
 
 # Vorhersageparameter (NWP / Nowcast)
 NWP_PARAMS = "t2m,rh2m,u10m,v10m,ugust,vgust,rain_acc,snow_acc,tcc,grad"
-NOWCAST_PARAMS = "t2m,rh2m,ff,dd,rr,pt"
+NOWCAST_PARAMS = "t2m,rh2m,ff,dd,fx,rr,pt"
 
 # Vorhersageparameter (Ensemble – Median-Perzentile, andere Namenskonvention)
 # Hinweis: rh2m ist im Ensemble-Modell nicht verfügbar → humidity immer None.
