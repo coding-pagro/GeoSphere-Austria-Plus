@@ -271,6 +271,11 @@ class TestForecastFallbackProperties:
         self._set_forecast(forecast_coord, rain_acc=1.2)
         assert no_station_entity.native_precipitation == pytest.approx(1.2)
 
+    def test_snow_only_native_precipitation_from_forecast(self, no_station_entity, forecast_coord):
+        """Bug 3.1: snow_acc alone must appear in entity-level native_precipitation when rain is zero."""
+        self._set_forecast(forecast_coord, rain_acc=0.0, snow_acc=0.8)
+        assert no_station_entity.native_precipitation == pytest.approx(0.8)
+
     def test_none_when_no_forecast_data(self, no_station_entity, forecast_coord):
         forecast_coord.data = []
         assert no_station_entity.native_temperature is None
@@ -476,6 +481,30 @@ class TestBuildHourlyForecasts:
         forecasts = entity._build_hourly_forecasts()
         assert forecasts[0]["solar_irradiance"] == pytest.approx(123.5)
 
+    def test_snow_only_precipitation_is_included(self, entity, current_coord, forecast_coord):
+        """Bug 3.2: snow_acc alone must appear in native_precipitation (was silently dropped)."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(rain_acc=0.0, snow_acc=1.5)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0].native_precipitation == pytest.approx(1.5)
+
+    def test_rain_and_snow_precipitation_are_summed(self, entity, current_coord, forecast_coord):
+        """Bug 3.2: rain_acc and snow_acc must both contribute to native_precipitation."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(rain_acc=0.8, snow_acc=0.4)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0].native_precipitation == pytest.approx(1.2)
+
+    def test_rain_only_precipitation_unchanged(self, entity, current_coord, forecast_coord):
+        """Existing rain-only case must still work after the fix."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(rain_acc=2.0, snow_acc=0.0)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0].native_precipitation == pytest.approx(2.0)
+
 
 # ---------------------------------------------------------------------------
 # _build_daily_forecasts
@@ -572,6 +601,14 @@ class TestBuildDailyForecasts:
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "snowy"
 
+    def test_rain_and_snow_above_2mm_gives_snowy_rainy(self, entity, current_coord, forecast_coord):
+        """Bug 3.3: both rain and snow above 2 mm threshold must produce snowy-rainy."""
+        current_coord.data = {}
+        # rain_total=4.8 mm, snow_total=4.8 mm → beide > 2.0 mm → snowy-rainy
+        forecast_coord.data = self._acc_entries(day_offset=1, rain_total=4.8, snow_total=4.8)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "snowy-rainy"
+
     def test_precipitation_is_sum_of_intervals(self, entity, current_coord, forecast_coord):
         """native_precipitation muss die Summe der Intervallwerte sein (bereits de-akkumuliert)."""
         current_coord.data = {}
@@ -579,6 +616,20 @@ class TestBuildDailyForecasts:
         forecast_coord.data = self._acc_entries(day_offset=1, rain_total=9.0, count=4)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].native_precipitation == pytest.approx(9.0)
+
+    def test_snow_only_native_precipitation_daily(self, entity, current_coord, forecast_coord):
+        """Bug 3.2: snow_acc alone must appear in daily native_precipitation."""
+        current_coord.data = {}
+        forecast_coord.data = self._acc_entries(day_offset=1, snow_total=6.0, count=4)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_precipitation == pytest.approx(6.0)
+
+    def test_rain_and_snow_summed_in_daily_precipitation(self, entity, current_coord, forecast_coord):
+        """Bug 3.2: rain_acc and snow_acc both contribute to daily native_precipitation."""
+        current_coord.data = {}
+        forecast_coord.data = self._acc_entries(day_offset=1, rain_total=4.0, snow_total=3.0, count=4)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_precipitation == pytest.approx(7.0)
 
     def test_capped_at_7_days(self, entity, current_coord, forecast_coord):
         current_coord.data = {}
