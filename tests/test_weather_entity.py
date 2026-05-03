@@ -607,6 +607,152 @@ class TestBuildDailyForecasts:
         forecast_coord.data = []
         assert entity._build_daily_forecasts() == []
 
+    def test_snow_only_native_precipitation_daily(self, entity, current_coord, forecast_coord):
+        """Bug 3.2: snow_acc alone must appear in daily native_precipitation."""
+        current_coord.data = {}
+        forecast_coord.data = self._acc_entries(day_offset=1, snow_total=6.0, count=4)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_precipitation == pytest.approx(6.0)
+
+    def test_rain_and_snow_summed_in_daily_precipitation(self, entity, current_coord, forecast_coord):
+        """Bug 3.2: rain_acc and snow_acc both contribute to daily native_precipitation."""
+        current_coord.data = {}
+        forecast_coord.data = self._acc_entries(day_offset=1, rain_total=4.0, snow_total=3.0, count=4)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_precipitation == pytest.approx(7.0)
+
+
+# ---------------------------------------------------------------------------
+# _build_daily_forecasts – Ensemble model (per-period precipitation)
+# ---------------------------------------------------------------------------
+
+class TestBuildDailyForecastsEnsemble:
+    """Verify that daily aggregation sums per-period ensemble values directly.
+
+    After api.py normalisation, ensemble entries carry rain_acc/snow_acc as
+    per-period millimetres (total for the 1h window, not cumulative since model
+    start). The daily forecast must sum them directly — never compute deltas —
+    even when values are non-monotonic across hours.
+    """
+
+    @pytest.fixture
+    def ensemble_entity(self, current_coord, forecast_coord):
+        return GeoSphereWeatherEntity(
+            current_coordinator=current_coord,
+            forecast_coordinator=forecast_coord,
+            entry_id="ens_entry",
+            model="ensemble-v1-1h-2500m",
+            location_name="Test",
+            lon=16.0,
+        )
+
+    def _ensemble_day_entries(
+        self,
+        day_offset: int,
+        rain_values: list[float],
+        snow_values: list[float] | None = None,
+    ) -> list[dict]:
+        """Generate hourly ensemble entries for one day with explicit per-period values."""
+        base_dt = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=day_offset)
+        )
+        if snow_values is None:
+            snow_values = [0.0] * len(rain_values)
+        return [
+            {
+                "datetime": (base_dt + timedelta(hours=i)).isoformat(),
+                "t2m": 10.0,
+                "rain_acc": r,
+                "snow_acc": s,
+                "rh2m": 65.0,
+                "u10m": 1.0,
+                "v10m": 1.0,
+                "tcc": 0.5,
+            }
+            for i, (r, s) in enumerate(zip(rain_values, snow_values))
+        ]
+
+    def test_ensemble_daily_rain_is_direct_sum_not_delta(
+        self, ensemble_entity, current_coord, forecast_coord
+    ):
+        """Bug 3.3: daily precipitation sums per-period values, not monotonic deltas.
+
+        Non-monotonic per-period values (e.g. 0.5, 1.2, 0.3) must be summed
+        directly (=2.0), not delta-computed as if they were cumulative since model start.
+        """
+        current_coord.data = {}
+        rain_steps = [0.5, 1.2, 0.3, 0.0]
+        forecast_coord.data = self._ensemble_day_entries(
+            day_offset=1, rain_values=rain_steps
+        )
+
+        forecasts = ensemble_entity._build_daily_forecasts()
+        assert len(forecasts) == 1
+        assert forecasts[0].native_precipitation == pytest.approx(sum(rain_steps))
+
+    def test_ensemble_daily_snow_is_direct_sum(
+        self, ensemble_entity, current_coord, forecast_coord
+    ):
+        """Bug 3.3: per-period snow values are summed, not delta-computed."""
+        current_coord.data = {}
+        snow_steps = [2.0, 0.5, 1.8, 0.0]
+        forecast_coord.data = self._ensemble_day_entries(
+            day_offset=1,
+            rain_values=[0.0] * len(snow_steps),
+            snow_values=snow_steps,
+        )
+
+        forecasts = ensemble_entity._build_daily_forecasts()
+        assert len(forecasts) == 1
+        assert forecasts[0].native_precipitation == pytest.approx(sum(snow_steps))
+
+    def test_ensemble_daily_rain_and_snow_both_summed(
+        self, ensemble_entity, current_coord, forecast_coord
+    ):
+        """Bug 3.3: rain and snow per-period values both contribute to daily total."""
+        current_coord.data = {}
+        rain_steps = [0.3, 0.7, 0.0, 0.5]
+        snow_steps = [0.0, 0.2, 1.0, 0.3]
+        forecast_coord.data = self._ensemble_day_entries(
+            day_offset=1, rain_values=rain_steps, snow_values=snow_steps
+        )
+
+        forecasts = ensemble_entity._build_daily_forecasts()
+        expected = sum(rain_steps) + sum(snow_steps)
+        assert forecasts[0].native_precipitation == pytest.approx(expected)
+
+    def test_ensemble_daily_rainy_condition_from_summed_total(
+        self, ensemble_entity, current_coord, forecast_coord
+    ):
+        """Bug 3.3: condition is derived from the correct summed total (>2 mm → rainy)."""
+        current_coord.data = {}
+        # 4 steps of 0.6 mm each = 2.4 mm total → rainy
+        rain_steps = [0.6] * 4
+        forecast_coord.data = self._ensemble_day_entries(
+            day_offset=1, rain_values=rain_steps
+        )
+
+        forecasts = ensemble_entity._build_daily_forecasts()
+        assert forecasts[0].condition == "rainy"
+
+    def test_ensemble_daily_multiple_days_each_summed_independently(
+        self, ensemble_entity, current_coord, forecast_coord
+    ):
+        """Per-period values for each day are summed independently."""
+        current_coord.data = {}
+        day1_rain = [1.0, 0.5, 0.0, 0.5]  # total 2.0
+        day2_rain = [0.0, 0.2, 0.8, 0.0]  # total 1.0
+
+        all_entries = self._ensemble_day_entries(1, day1_rain)
+        all_entries += self._ensemble_day_entries(2, day2_rain)
+        forecast_coord.data = all_entries
+
+        forecasts = ensemble_entity._build_daily_forecasts()
+        assert len(forecasts) == 2
+        assert forecasts[0].native_precipitation == pytest.approx(sum(day1_rain))
+        assert forecasts[1].native_precipitation == pytest.approx(sum(day2_rain))
+
 
 # ---------------------------------------------------------------------------
 # async_forecast_hourly / async_forecast_daily (integration of async path)
