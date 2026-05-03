@@ -292,9 +292,10 @@ class GeoSphereWeatherEntity(
         entry = self._first_forecast_entry
         if entry is None:
             return None
-        # Nowcast: rr (Niederschlagsrate mm/15min); NWP/Ensemble: rain_acc + snow_acc (mm/Zeitschritt, bereits de-akkumuliert)
-        if "rr" in entry:
-            return entry["rr"]
+        # Nach Normalisierung in api.py liefern alle Modelle rain_acc/snow_acc als mm/Zeitschritt:
+        #   - Nowcast: aus rr+pt abgeleitet (_normalize_nowcast_params)
+        #   - Ensemble: rain_p50/snow_p50 als Periodensummen (_normalize_ensemble_params)
+        #   - NWP: nach _deaccumulate_precip de-akkumuliert
         rain = entry.get("rain_acc") or 0.0
         snow = entry.get("snow_acc") or 0.0
         if rain == 0.0 and snow == 0.0:
@@ -505,6 +506,9 @@ class GeoSphereWeatherEntity(
                 wind_max,
                 True,
             )
+            # Reihenfolge ist beabsichtigt: bei gleichzeitigem Regen UND Schnee jeweils
+            # über 2 mm wird "snowy-rainy" bevorzugt — auch wenn rain_total > 10 mm wäre.
+            # Das ist semantisch informativer als "pouring", das den Schneeanteil verdeckt.
             if rain_total > 2.0 and snow_total > 2.0:
                 cond = "snowy-rainy"
             elif rain_total > 10.0:
