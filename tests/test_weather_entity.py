@@ -505,6 +505,31 @@ class TestBuildHourlyForecasts:
         forecasts = entity._build_hourly_forecasts()
         assert forecasts[0].native_precipitation == pytest.approx(2.0)
 
+    def test_thunderstorm_sy_code_gives_lightning_rainy(self, entity, current_coord, forecast_coord):
+        """sy=26 maps to lightning-rainy regardless of tcc/rain values."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(tcc=0.3, rain_acc=0.0, snow_acc=0.0, sy=26)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0].condition == "lightning-rainy"
+
+    def test_sy_takes_priority_over_derived_condition(self, entity, current_coord, forecast_coord):
+        """sy-derived condition overrides the tcc/rain derived value."""
+        current_coord.data = {}
+        # tcc=0.9 alone would give cloudy, but sy=6 (ground fog) should win
+        forecast_coord.data = [_future_entry(tcc=0.9, rain_acc=0.0, snow_acc=0.0, sy=6)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0].condition == "fog"
+
+    def test_missing_sy_falls_back_to_derived_condition(self, entity, current_coord, forecast_coord):
+        """When sy is absent, condition is derived from tcc/rain."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(tcc=0.9, rain_acc=0.0, snow_acc=0.0)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0].condition == "cloudy"
+
 
 # ---------------------------------------------------------------------------
 # _build_daily_forecasts
@@ -671,6 +696,61 @@ class TestBuildDailyForecasts:
         forecast_coord.data = self._acc_entries(day_offset=1, rain_total=4.0, snow_total=3.0, count=4)
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].native_precipitation == pytest.approx(7.0)
+
+    def test_thunderstorm_sy_code_gives_lightning_rainy(self, entity, current_coord, forecast_coord):
+        """If any hourly entry has a thunderstorm sy code, the day is lightning-rainy."""
+        current_coord.data = {}
+        # Mostly clear day, but one hour has a thunderstorm (sy=26)
+        entries = self._day_entries(day_offset=1, count=24)
+        entries[12]["sy"] = 26
+        forecast_coord.data = entries
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "lightning-rainy"
+
+    def test_thunderstorm_sy_32_gives_lightning_rainy(self, entity, current_coord, forecast_coord):
+        """All thunderstorm codes (26–32) trigger lightning-rainy for the day."""
+        current_coord.data = {}
+        entries = self._day_entries(day_offset=1, count=24)
+        entries[6]["sy"] = 32
+        forecast_coord.data = entries
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "lightning-rainy"
+
+    def test_no_thunderstorm_sy_uses_derived_condition(self, entity, current_coord, forecast_coord):
+        """Without a thunderstorm sy code, the daily condition uses the derived logic."""
+        current_coord.data = {}
+        # Heavy rain day without thunderstorm
+        forecast_coord.data = self._acc_entries(day_offset=1, rain_total=12.0)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "pouring"
+
+    def test_thunderstorm_overrides_heavy_rain(self, entity, current_coord, forecast_coord):
+        """Thunderstorm takes priority even over a heavy-rain day."""
+        current_coord.data = {}
+        entries = self._acc_entries(day_offset=1, rain_total=12.0)
+        entries[0]["sy"] = 27
+        forecast_coord.data = entries
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "lightning-rainy"
+
+    def test_thunderstorm_sy_as_float_is_handled(self, entity, current_coord, forecast_coord):
+        """Robustness: sy delivered as float (e.g. 26.0) still triggers lightning-rainy."""
+        current_coord.data = {}
+        entries = self._day_entries(day_offset=1, count=24)
+        entries[12]["sy"] = 26.0
+        forecast_coord.data = entries
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "lightning-rainy"
+
+    def test_invalid_sy_does_not_crash(self, entity, current_coord, forecast_coord):
+        """Robustness: non-numeric sy values are silently ignored, no crash."""
+        current_coord.data = {}
+        entries = self._day_entries(day_offset=1, count=24)
+        entries[5]["sy"] = "garbage"
+        forecast_coord.data = entries
+        # Must not raise; the bad sy is ignored, derived condition used
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition != "lightning-rainy"
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
-"""Tests for nwp_to_condition – pure function, no HA dependencies."""
+"""Tests for nwp_to_condition and sy_to_condition – pure functions, no HA dependencies."""
 import pytest
 
-from custom_components.geosphere_austria_plus.weather import nwp_to_condition
+from custom_components.geosphere_austria_plus.weather import nwp_to_condition, sy_to_condition
 
 
 class TestNwpToCondition:
@@ -97,3 +97,179 @@ class TestNwpToCondition:
 
     def test_none_tcc_snow_takes_priority(self):
         assert nwp_to_condition(None, 0.0, 0.5, 5.0, True) == "snowy"
+
+
+class TestSyToCondition:
+    # ------------------------------------------------------------------
+    # Thunderstorm codes (26–32) → lightning-rainy
+    # ------------------------------------------------------------------
+
+    def test_thunderstorm_code_26(self):
+        assert sy_to_condition(26, True) == "lightning-rainy"
+
+    def test_thunderstorm_code_27(self):
+        assert sy_to_condition(27, True) == "lightning-rainy"
+
+    def test_thunderstorm_code_28(self):
+        assert sy_to_condition(28, True) == "lightning-rainy"
+
+    def test_thunderstorm_code_29(self):
+        assert sy_to_condition(29, True) == "lightning-rainy"
+
+    def test_thunderstorm_code_30(self):
+        assert sy_to_condition(30, True) == "lightning-rainy"
+
+    def test_thunderstorm_code_31(self):
+        assert sy_to_condition(31, True) == "lightning-rainy"
+
+    def test_thunderstorm_code_32(self):
+        assert sy_to_condition(32, True) == "lightning-rainy"
+
+    def test_thunderstorm_at_night_still_lightning_rainy(self):
+        assert sy_to_condition(26, False) == "lightning-rainy"
+
+    # ------------------------------------------------------------------
+    # Clear / fair conditions respect day/night
+    # ------------------------------------------------------------------
+
+    def test_cloudless_daytime(self):
+        assert sy_to_condition(1, True) == "sunny"
+
+    def test_cloudless_nighttime(self):
+        assert sy_to_condition(1, False) == "clear-night"
+
+    def test_fair_daytime(self):
+        assert sy_to_condition(2, True) == "sunny"
+
+    def test_fair_nighttime(self):
+        assert sy_to_condition(2, False) == "clear-night"
+
+    # ------------------------------------------------------------------
+    # Cloud cover codes
+    # ------------------------------------------------------------------
+
+    def test_partly_cloudy(self):
+        assert sy_to_condition(3, True) == "partlycloudy"
+
+    def test_heavily_overcast(self):
+        assert sy_to_condition(4, True) == "cloudy"
+
+    def test_overcast(self):
+        assert sy_to_condition(5, True) == "cloudy"
+
+    # ------------------------------------------------------------------
+    # Fog codes
+    # ------------------------------------------------------------------
+
+    def test_ground_fog(self):
+        assert sy_to_condition(6, True) == "fog"
+
+    def test_high_fog(self):
+        assert sy_to_condition(7, True) == "fog"
+
+    # ------------------------------------------------------------------
+    # Rain codes
+    # ------------------------------------------------------------------
+
+    def test_light_rain(self):
+        assert sy_to_condition(8, True) == "rainy"
+
+    def test_moderate_rain(self):
+        assert sy_to_condition(9, True) == "rainy"
+
+    def test_heavy_rain_pouring(self):
+        assert sy_to_condition(10, True) == "pouring"
+
+    def test_rain_showers(self):
+        assert sy_to_condition(17, True) == "rainy"
+
+    def test_heavy_showers_pouring(self):
+        assert sy_to_condition(19, True) == "pouring"
+
+    # ------------------------------------------------------------------
+    # Snow-rain mix codes
+    # ------------------------------------------------------------------
+
+    def test_rain_snow_mix_11(self):
+        assert sy_to_condition(11, True) == "snowy-rainy"
+
+    def test_rain_snow_mix_20(self):
+        assert sy_to_condition(20, True) == "snowy-rainy"
+
+    def test_rain_snow_mix_22(self):
+        assert sy_to_condition(22, True) == "snowy-rainy"
+
+    # ------------------------------------------------------------------
+    # Snow codes
+    # ------------------------------------------------------------------
+
+    def test_light_snow(self):
+        assert sy_to_condition(14, True) == "snowy"
+
+    def test_heavy_snow(self):
+        assert sy_to_condition(16, True) == "snowy"
+
+    def test_snow_showers(self):
+        assert sy_to_condition(23, True) == "snowy"
+
+    def test_heavy_snow_showers(self):
+        assert sy_to_condition(25, True) == "snowy"
+
+    # ------------------------------------------------------------------
+    # Edge cases
+    # ------------------------------------------------------------------
+
+    def test_none_sy_returns_none(self):
+        assert sy_to_condition(None, True) is None
+
+    def test_unknown_code_returns_none(self):
+        assert sy_to_condition(0, True) is None
+
+    def test_unknown_code_33_returns_none(self):
+        assert sy_to_condition(33, True) is None
+
+    def test_float_code_is_accepted(self):
+        # API may return sy as a float
+        assert sy_to_condition(26.0, True) == "lightning-rainy"
+
+
+class TestNwpToConditionWithSy:
+    """nwp_to_condition prefers sy when available."""
+
+    # ------------------------------------------------------------------
+    # sy takes priority over derived conditions
+    # ------------------------------------------------------------------
+
+    def test_sy_thunderstorm_overrides_rainy_derived(self):
+        # Without sy this would be "rainy" from rain_mm alone
+        assert nwp_to_condition(0.5, 2.0, 0.0, 5.0, True, sy=26) == "lightning-rainy"
+
+    def test_sy_thunderstorm_overrides_cloudy_derived(self):
+        assert nwp_to_condition(0.9, 0.0, 0.0, 5.0, True, sy=28) == "lightning-rainy"
+
+    def test_sy_fog_overrides_rainy_derived(self):
+        assert nwp_to_condition(0.9, 0.5, 0.0, 5.0, True, sy=6) == "fog"
+
+    def test_sy_sunny_used_when_no_precipitation(self):
+        assert nwp_to_condition(0.9, 0.0, 0.0, 5.0, True, sy=1) == "sunny"
+
+    def test_sy_clear_night_when_nighttime(self):
+        assert nwp_to_condition(0.3, 0.0, 0.0, 5.0, False, sy=2) == "clear-night"
+
+    # ------------------------------------------------------------------
+    # Fallback to derived logic when sy is None
+    # ------------------------------------------------------------------
+
+    def test_no_sy_falls_back_to_derived_rainy(self):
+        assert nwp_to_condition(0.5, 2.0, 0.0, 5.0, True, sy=None) == "rainy"
+
+    def test_no_sy_falls_back_to_derived_cloudy(self):
+        assert nwp_to_condition(0.9, 0.0, 0.0, 5.0, True, sy=None) == "cloudy"
+
+    # ------------------------------------------------------------------
+    # Backward compatibility: sy defaults to None
+    # ------------------------------------------------------------------
+
+    def test_missing_sy_arg_uses_derived_logic(self):
+        # Calling without sy argument must still work (default=None)
+        assert nwp_to_condition(0.9, 0.0, 0.0, 5.0, True) == "cloudy"
