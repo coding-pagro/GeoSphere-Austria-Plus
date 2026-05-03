@@ -172,6 +172,7 @@ class GeoSphereApi:
                 "snow_acc": snow_acc,
                 "u10m": u10m,
                 "v10m": v10m,
+                "wind_gust_speed": entry.get("fx"),  # Nowcast liefert fx (skalare Böengeschwindigkeit)
                 "tcc": None,  # Nowcast liefert keine Wolkenbedeckung
             })
         return normalized

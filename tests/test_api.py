@@ -686,6 +686,20 @@ class TestNormalizeNowcastParams:
         result = GeoSphereApi._normalize_nowcast_params(entries)
         assert result[0]["datetime"] == "2026-04-07T12:00:00Z"
 
+    def test_fx_mapped_to_wind_gust_speed(self):
+        """fx (scalar gust speed) is mapped to wind_gust_speed in the normalized entry."""
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 0.0, "pt": 0,
+                    "ff": 5.0, "dd": 0.0, "fx": 12.5, "t2m": 10.0, "rh2m": 60.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["wind_gust_speed"] == pytest.approx(12.5)
+
+    def test_wind_gust_speed_none_when_fx_absent(self):
+        """Entries without fx produce wind_gust_speed=None."""
+        entries = [{"datetime": "2026-01-01T00:00:00Z", "rr": 0.0, "pt": 0,
+                    "ff": 5.0, "dd": 0.0, "t2m": 10.0, "rh2m": 60.0}]
+        result = GeoSphereApi._normalize_nowcast_params(entries)
+        assert result[0]["wind_gust_speed"] is None
+
 
 class TestDeaccumulateGrad:
     """Tests für die NWP-Globalstrahlungs-Deakkumulation (Ws/m² → W/m²)."""
