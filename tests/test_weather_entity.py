@@ -530,6 +530,42 @@ class TestBuildHourlyForecasts:
         forecasts = entity._build_hourly_forecasts()
         assert forecasts[0].condition == "cloudy"
 
+    # ------------------------------------------------------------------
+    # Tier 1: snowlmt and cape forecast attributes
+    # ------------------------------------------------------------------
+
+    def test_snowlmt_attribute_in_hourly_forecast(self, entity, current_coord, forecast_coord):
+        """snowlmt (snowfall altitude in m) is exposed as 'snow_altitude' attribute."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(snowlmt=1850.5)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0]["snow_altitude"] == 1850
+
+    def test_cape_attribute_in_hourly_forecast(self, entity, current_coord, forecast_coord):
+        """cape (convective available potential energy) is exposed as 'cape' attribute."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(cape=1234.7)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0]["cape"] == 1235
+
+    def test_snowlmt_absent_when_not_in_data(self, entity, current_coord, forecast_coord):
+        """Without snowlmt key, the forecast entry must not contain 'snow_altitude'."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry()]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert "snow_altitude" not in forecasts[0]
+
+    def test_cape_absent_when_not_in_data(self, entity, current_coord, forecast_coord):
+        """Without cape key, the forecast entry must not contain 'cape'."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry()]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert "cape" not in forecasts[0]
+
 
 # ---------------------------------------------------------------------------
 # _build_daily_forecasts
@@ -751,6 +787,100 @@ class TestBuildDailyForecasts:
         # Must not raise; the bad sy is ignored, derived condition used
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition != "lightning-rainy"
+
+    # ------------------------------------------------------------------
+    # Tier 1: native mxt2m/mnt2m for daily extremes
+    # ------------------------------------------------------------------
+
+    def test_daily_uses_native_mxt2m_when_available(self, entity, current_coord, forecast_coord):
+        """When mxt2m is provided, it overrides max(t2m) for native_temperature."""
+        current_coord.data = {}
+        # t2m sequence peaks at 11.5, but model knows the true peak was 13.0
+        entries = self._day_entries(day_offset=1, count=4)
+        for e in entries:
+            e["mxt2m"] = 13.0
+            e["mnt2m"] = 8.5
+        forecast_coord.data = entries
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_temperature == pytest.approx(13.0)
+        assert forecasts[0].native_templow == pytest.approx(8.5)
+
+    def test_daily_falls_back_to_t2m_when_mxt2m_missing(self, entity, current_coord, forecast_coord):
+        """Without mxt2m/mnt2m, daily extremes fall back to min/max of hourly t2m."""
+        current_coord.data = {}
+        entries = self._day_entries(day_offset=1, count=4)  # t2m: 10.0, 10.5, 11.0, 11.5
+        forecast_coord.data = entries
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_temperature == pytest.approx(11.5)
+        assert forecasts[0].native_templow == pytest.approx(10.0)
+
+    def test_daily_uses_max_of_mxt2m_across_hours(self, entity, current_coord, forecast_coord):
+        """mxt2m varies across hours — daily peak is the maximum across the day."""
+        current_coord.data = {}
+        entries = self._day_entries(day_offset=1, count=4)
+        for i, mx in enumerate([12.0, 15.0, 14.0, 13.0]):
+            entries[i]["mxt2m"] = mx
+            entries[i]["mnt2m"] = 5.0  # constant, only mx varies
+        forecast_coord.data = entries
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_temperature == pytest.approx(15.0)
+
+    # ------------------------------------------------------------------
+    # Tier 1: snowlmt and cape daily aggregation
+    # ------------------------------------------------------------------
+
+    def test_daily_snow_altitude_is_minimum(self, entity, current_coord, forecast_coord):
+        """Daily snow_altitude is the lowest hourly value (most-down-reaching snowfall)."""
+        current_coord.data = {}
+        entries = self._day_entries(day_offset=1, count=4)
+        for i, sl in enumerate([2200.0, 1800.0, 1500.5, 1900.0]):
+            entries[i]["snowlmt"] = sl
+        forecast_coord.data = entries
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0]["snow_altitude"] == 1500  # rounded min
+
+    def test_daily_cape_is_maximum(self, entity, current_coord, forecast_coord):
+        """Daily cape is the maximum hourly value (peak thunderstorm potential)."""
+        current_coord.data = {}
+        entries = self._day_entries(day_offset=1, count=4)
+        for i, c in enumerate([200.0, 800.0, 2400.5, 1500.0]):
+            entries[i]["cape"] = c
+        forecast_coord.data = entries
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0]["cape"] == 2400  # rounded max
+
+    def test_daily_snowlmt_absent_when_not_in_data(self, entity, current_coord, forecast_coord):
+        """Without snowlmt in hourly entries, daily forecast omits 'snow_altitude'."""
+        current_coord.data = {}
+        forecast_coord.data = self._day_entries(day_offset=1, count=4)
+
+        forecasts = entity._build_daily_forecasts()
+        assert "snow_altitude" not in forecasts[0]
+
+    def test_daily_cape_absent_when_not_in_data(self, entity, current_coord, forecast_coord):
+        """Without cape in hourly entries, daily forecast omits 'cape'."""
+        current_coord.data = {}
+        forecast_coord.data = self._day_entries(day_offset=1, count=4)
+
+        forecasts = entity._build_daily_forecasts()
+        assert "cape" not in forecasts[0]
+
+    def test_daily_partial_snowlmt_data_still_aggregates(self, entity, current_coord, forecast_coord):
+        """Hours without snowlmt are skipped; the rest still aggregate correctly."""
+        current_coord.data = {}
+        entries = self._day_entries(day_offset=1, count=4)
+        entries[0]["snowlmt"] = 1800.0
+        entries[2]["snowlmt"] = 1500.0
+        # entries[1], entries[3] have no snowlmt
+        forecast_coord.data = entries
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0]["snow_altitude"] == 1500
 
 
 # ---------------------------------------------------------------------------

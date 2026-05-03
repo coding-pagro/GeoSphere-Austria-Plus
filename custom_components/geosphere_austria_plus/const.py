@@ -64,7 +64,7 @@ AQI_BREAKPOINTS: dict[str, list[float]] = {
 
 # Aktuelle Messwerte (TAWES – 10-Minuten-Auflösung)
 TAWES_RESOURCE = "tawes-v1-10min"
-TAWES_PARAMS = "TL,TP,RF,DD,FF,FX,P,PRED,RR,SO,SH,GLOW"
+TAWES_PARAMS = "TL,TP,RF,DD,FF,FX,P,PRED,RR,SO,SH,GLOW,TB1"
 
 # Vorhersagemodelle (gültige IDs – Bezeichnungen in den Übersetzungsdateien)
 FORECAST_MODELS = [
@@ -81,12 +81,15 @@ FORECAST_MODEL_LABELS = {
 }
 
 # Vorhersageparameter (NWP / Nowcast)
-NWP_PARAMS = "t2m,rh2m,u10m,v10m,ugust,vgust,rain_acc,snow_acc,tcc,grad,sy"
+# - mxt2m/mnt2m: Max/Min-Temperatur je Forecast-Periode (genauer als min/max(t2m))
+# - snowlmt: Schneefallgrenze (m) — hochrelevant für österreichisches Bergland
+# - cape: Convective Available Potential Energy (m²/s²) — quantitatives Gewitterpotenzial
+NWP_PARAMS = "t2m,mxt2m,mnt2m,rh2m,u10m,v10m,ugust,vgust,rain_acc,snow_acc,tcc,grad,sy,snowlmt,cape"
 NOWCAST_PARAMS = "t2m,rh2m,ff,dd,fx,rr,pt"
 
 # Vorhersageparameter (Ensemble – Median-Perzentile, andere Namenskonvention)
 # Hinweis: rh2m ist im Ensemble-Modell nicht verfügbar → humidity immer None.
-ENSEMBLE_PARAMS = "t2m_p50,rain_p50,snow_p50,sundur_p50,grad_p50"
+ENSEMBLE_PARAMS = "t2m_p50,mxt2m_p50,mnt2m_p50,rain_p50,snow_p50,sundur_p50,grad_p50,snowlmt_p50,cape_p50"
 
 # Normalisierung: Ensemble-Parameternamen → NWP-Parameternamen
 # Ermöglicht identische Verarbeitung in weather.py
@@ -94,13 +97,19 @@ ENSEMBLE_PARAMS = "t2m_p50,rain_p50,snow_p50,sundur_p50,grad_p50"
 # - grad_p50 ist ein Momentanwert (W/m², instantaneous flux)
 # - rain_p50, snow_p50 sind Periodensummen (mm/Periode, 1h Fenster),
 #   keine Akkumulationen seit Modellstart wie NWP rain_acc/snow_acc
+# - snowlmt_p50, cape_p50 sind Momentanwerte (m bzw. m²/s²) → identisches Format
+# - mxt2m_p50/mnt2m_p50 sind Tages-/Periodenextreme (°C) → identisches Format
 # NWP grad (Ws/m²) wird in api.py per Delta/3600 in W/m² umgerechnet –
 # danach identisches Format für grad.
 ENSEMBLE_PARAM_MAP = {
-    "t2m_p50":    "t2m",
-    "rain_p50":   "rain_acc",
-    "snow_p50":   "snow_acc",
-    "sundur_p50": "sundur",
-    "grad_p50":   "grad",
+    "t2m_p50":     "t2m",
+    "mxt2m_p50":   "mxt2m",
+    "mnt2m_p50":   "mnt2m",
+    "rain_p50":    "rain_acc",
+    "snow_p50":    "snow_acc",
+    "sundur_p50":  "sundur",
+    "grad_p50":    "grad",
+    "snowlmt_p50": "snowlmt",
+    "cape_p50":    "cape",
 }
 

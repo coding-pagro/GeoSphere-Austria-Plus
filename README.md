@@ -10,18 +10,19 @@ Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (C
 
 | Feature | Status |
 |---|---|
-| **12 TAWES-Sensoren** (Temperatur, Feuchte, Druck, Wind, Strahlung, …) | ✅ |
-| **Wetterbedingungen (condition)** | ✅ |
-| **Stündliche Vorhersage (hourly forecast, 48 h)** | ✅ |
-| **Tägliche Vorhersage (daily forecast, 7 Tage)** | ✅ |
+| **13 TAWES-Sensoren** (Temperatur, Feuchte, Druck, Wind, Strahlung, Bodentemperatur, …) | ✅ |
+| **Wetterbedingungen (condition)** inkl. Gewitter-Erkennung über GeoSphere-Symbolcode | ✅ |
+| **Stündliche Vorhersage (hourly forecast, 48 h)** mit Solarstrahlung, Schneefallgrenze, CAPE, Böen | ✅ |
+| **Tägliche Vorhersage (daily forecast, 7 Tage)** mit modell-eigenen Tagesextremen | ✅ |
 | **Wetterwarnungen (Unwetterwarnungen)** | ✅ |
 | **Luftqualitätsindex (NO₂, O₃, PM10, PM2.5 + AQI)** | ✅ |
 | 0–3 Vorhersagemodelle pro Station wählbar | ✅ |
+| **Robust gegen API-Ausfälle** (Last-known-good-Cache + Fibonacci-Backoff-Retry) | ✅ |
 | Keine API-Key erforderlich | ✅ |
 
 ### TAWES-Sensoren
 
-Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfrage, die auch die aktuellen Wetterbedingungen liefert. Weil die Rohdaten damit ohnehin vorhanden sind, werden sie als **12 einzelne Sensor-Entitäten** direkt im Gerät exponiert, ohne einen einzigen zusätzlichen API-Call:
+Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfrage, die auch die aktuellen Wetterbedingungen liefert. Weil die Rohdaten damit ohnehin vorhanden sind, werden sie als **13 einzelne Sensor-Entitäten** direkt im Gerät exponiert, ohne einen einzigen zusätzlichen API-Call:
 
 | Sensor | Parameter | Einheit |
 |---|---|---|
@@ -37,6 +38,7 @@ Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfr
 | Sunshine Duration | SO | s / 10 min |
 | Snow Height | SH | cm |
 | Global Radiation | GLOW | W/m² |
+| **Soil Temperature (10 cm)** | **TB1** | **°C** |
 
 Alle Sensoren teilen sich dasselbe Gerät (Wetterstation) mit der Wetterentität und stehen sofort in Automationen, Dashboards und dem Energiemanagement zur Verfügung.
 
@@ -135,9 +137,32 @@ Die Condition wird aus den TAWES-Echtzeitdaten abgeleitet (Priorität höchste z
 | 8 | `windy` | FF ≥ 10 m/s |
 | 9 | `sunny` / `clear-night` | Default |
 
-Ist keine TAWES-Station konfiguriert, werden alle aktuellen Werte (Condition, Temperatur, Feuchte, Wind, Niederschlag) aus dem ersten verfügbaren Vorhersagepunkt abgeleitet. Taupunkt, Luftdruck und Böen bleiben leer, da die Modelle diese Größen nicht liefern.
+Ist keine TAWES-Station konfiguriert, werden alle aktuellen Werte (Condition, Temperatur, Feuchte, Wind, Niederschlag) aus dem ersten verfügbaren Vorhersagepunkt abgeleitet. Taupunkt, Luftdruck und einzelne abgeleitete Felder bleiben leer, da die Modelle diese Größen nicht alle liefern.
 
-Für die **Vorhersage** werden Wolkenbedeckung (`tcc`), Niederschlag (`rain_acc`, `snow_acc`) und Wind aus dem NWP-Modell verwendet.
+Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32 Codes inkl. Gewitter), sowie Wolkenbedeckung (`tcc`), Niederschlag (`rain_acc`, `snow_acc`) und Wind aus dem NWP-Modell verwendet. Erkennt das Modell innerhalb eines Tages mindestens eine Gewitter-Stunde (Symbolcode 26–32), wird der ganze Tag als `lightning-rainy` markiert.
+
+---
+
+## Vorhersage-Attribute
+
+Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Luftfeuchtigkeit) liefert die Integration je Forecast-Slot folgende Zusatzattribute, die in Dashboards (z. B. via `state_attr()`) verwendet werden können:
+
+| Attribut | Einheit | Quelle | Stündlich | Täglich |
+|---|---|---|---|---|
+| `solar_irradiance` | W/m² | NWP `grad`, Ensemble `grad_p50` | ✅ je Stunde | — |
+| `snow_altitude` | m | NWP `snowlmt`, Ensemble `snowlmt_p50` | ✅ je Stunde | ✅ Tagesminimum |
+| `cape` | m²/s² | NWP `cape`, Ensemble `cape_p50` | ✅ je Stunde | ✅ Tagesmaximum |
+
+- **`snow_altitude`** ist die Schneefallgrenze in Metern – hochrelevant im Bergland. Im Tagesforecast wird das Tagesminimum geliefert (= tiefstes Niveau, auf das Schneefall reicht).
+- **`cape`** quantifiziert das Gewitterpotenzial. Werte >1000 J/kg deuten auf Gewitter hin, >2500 auf schwere Gewitter. Im Tagesforecast wird das Tagesmaximum geliefert.
+
+---
+
+## Robustheit gegen API-Ausfälle
+
+Die GeoSphere-API ist gelegentlich nicht erreichbar. Damit Sensoren nicht für Stunden auf *„nicht verfügbar"* fallen, hat jeder Coordinator einen **Last-known-good-Cache**: Bei einem temporären API-Fehler werden die zuletzt erfolgreichen Daten weiter geliefert (eingefroren bis zum nächsten erfolgreichen Refresh).
+
+Zusätzlich planen die Coordinatoren bei einem Fehler beschleunigte Wiederholversuche mit Fibonacci-Abständen: **1 → 2 → 3 → 5 → 8 → 13 → 21 → 30 min** (Maximum). Sobald die API wieder antwortet, fällt der Backoff zurück auf das reguläre Polling-Intervall (10 min für TAWES, 60 min für Vorhersage).
 
 ---
 

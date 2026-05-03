@@ -13,6 +13,7 @@
       "sunshine_duration":{"name": "Sunshine Duration"},
       "snow_height":      {"name": "Snow Height"},
       "global_radiation": {"name": "Global Radiation"},
+      "soil_temperature_10cm": {"name": "Soil Temperature (10 cm)"},
       "warning_level":    {"name": "Warning Level"},
       "no2":              {"name": "Nitrogen Dioxide"},
       "o3":               {"name": "Ozone"},

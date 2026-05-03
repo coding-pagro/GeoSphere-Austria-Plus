@@ -151,6 +151,13 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         device_class=SensorDeviceClass.IRRADIANCE,
         state_class=SensorStateClass.MEASUREMENT,
     ),
+    TawesSensorDescription(
+        key="soil_temperature_10cm", translation_key="soil_temperature_10cm",
+        param="TB1",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
 )
 
 

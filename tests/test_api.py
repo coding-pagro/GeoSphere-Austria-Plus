@@ -330,7 +330,7 @@ class TestGetForecast:
         assert "msl" not in url_called
 
     async def test_nwp_model_uses_full_params(self):
-        """NWP model should include tcc, rain_acc, wind and grad params in URL."""
+        """NWP model should include tcc, rain_acc, wind, grad and Tier-1 params (snowlmt, cape, mxt2m/mnt2m)."""
         payload = {"features": [{"properties": {"parameters": {}}}]}
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
@@ -343,18 +343,27 @@ class TestGetForecast:
         assert "rain_acc" in url_called
         assert "u10m" in url_called
         assert "grad" in url_called
-        assert "cape" not in url_called
+        # Tier 1 additions
+        assert "snowlmt" in url_called
+        assert "cape" in url_called
+        assert "mxt2m" in url_called
+        assert "mnt2m" in url_called
+        # msl is still not requested
         assert "msl" not in url_called
 
     async def test_ensemble_model_uses_percentile_params(self):
-        """Ensemble model uses p50 percentile parameter names including grad_p50."""
+        """Ensemble model uses p50 percentile parameter names including grad_p50 and Tier-1 additions."""
         payload = _make_forecast_payload(
             ["2024-06-01T12:00:00Z"],
             t2m_p50=[12.0],
+            mxt2m_p50=[14.0],
+            mnt2m_p50=[10.0],
             rain_p50=[0.5],
             snow_p50=[0.0],
             sundur_p50=[1800.0],
             grad_p50=[250.0],
+            snowlmt_p50=[1800.0],
+            cape_p50=[200.0],
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
@@ -366,13 +375,22 @@ class TestGetForecast:
         assert "t2m_p50" in url_called
         assert "grad_p50" in url_called
         assert "rr_p50" not in url_called
-        assert "cape_p50" not in url_called
+        # Tier 1 additions are now requested for ensemble too
+        assert "cape_p50" in url_called
+        assert "snowlmt_p50" in url_called
+        assert "mxt2m_p50" in url_called
+        assert "mnt2m_p50" in url_called
         # Normalized names
         assert result[0]["t2m"] == 12.0
+        assert result[0]["mxt2m"] == 14.0
+        assert result[0]["mnt2m"] == 10.0
         assert result[0]["rain_acc"] == 0.5
         assert result[0]["snow_acc"] == 0.0
         # grad_p50 (W/m², direkt) → grad
         assert result[0]["grad"] == 250.0
+        # Tier 1 normalized
+        assert result[0]["snowlmt"] == 1800.0
+        assert result[0]["cape"] == 200.0
         # tcc derived from sundur: 1 - 1800/3600 = 0.5
         assert abs(result[0]["tcc"] - 0.5) < 1e-6
 

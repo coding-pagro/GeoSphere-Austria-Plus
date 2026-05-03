@@ -557,6 +557,14 @@ class GeoSphereWeatherEntity(
             grad = entry.get("grad")
             if grad is not None:
                 forecast_entry["solar_irradiance"] = round(grad, 1)  # type: ignore[typeddict-unknown-key]
+            # Schneefallgrenze (m) — hochrelevant für österreichisches Bergland
+            snowlmt = entry.get("snowlmt")
+            if snowlmt is not None:
+                forecast_entry["snow_altitude"] = round(snowlmt)  # type: ignore[typeddict-unknown-key]
+            # CAPE (m²/s²) — quantitatives Gewitterpotenzial
+            cape = entry.get("cape")
+            if cape is not None:
+                forecast_entry["cape"] = round(cape)  # type: ignore[typeddict-unknown-key]
             forecasts.append(forecast_entry)
 
         return forecasts[:48]
@@ -596,8 +604,12 @@ class GeoSphereWeatherEntity(
             rh_list = [e.get("rh2m") for e in entries if e.get("rh2m") is not None]
             tcc_list = [e["tcc"] for e in entries if e.get("tcc") is not None]
 
-            t_max = max(temps) if temps else None
-            t_min = min(temps) if temps else None
+            # Tagesextreme: native mxt2m/mnt2m vom Modell bevorzugen, sonst aus stündlichen
+            # t2m-Werten ableiten. Das Modell kennt Peaks auch zwischen vollen Stunden.
+            mxt2m_list = [e["mxt2m"] for e in entries if e.get("mxt2m") is not None]
+            mnt2m_list = [e["mnt2m"] for e in entries if e.get("mnt2m") is not None]
+            t_max = max(mxt2m_list) if mxt2m_list else (max(temps) if temps else None)
+            t_min = min(mnt2m_list) if mnt2m_list else (min(temps) if temps else None)
             # rain_acc/snow_acc sind immer Intervallwerte (mm/Zeitschritt):
             # NWP: nach _deaccumulate_precip in api.py de-akkumuliert.
             # Ensemble: rain_p50/snow_p50 sind Periodensummen (mm/Periode, kein Delta nötig).
@@ -655,20 +667,30 @@ class GeoSphereWeatherEntity(
                 elif snow_total > 2.0:
                     cond = "snowy"
 
+            # Schneefallgrenze: Tagesminimum (= tiefster Punkt an dem Schneefall möglich ist)
+            snowlmt_list = [e["snowlmt"] for e in entries if e.get("snowlmt") is not None]
+            snowlmt_min = min(snowlmt_list) if snowlmt_list else None
+            # CAPE: Tagesmaximum (höchstes Gewitterpotenzial im Tagesverlauf)
+            cape_list = [e["cape"] for e in entries if e.get("cape") is not None]
+            cape_max = max(cape_list) if cape_list else None
+
             dt_day = datetime.strptime(day_key, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            forecasts.append(
-                Forecast(
-                    datetime=dt_day.isoformat(),
-                    condition=cond,
-                    native_temperature=t_max,
-                    native_templow=t_min,
-                    native_precipitation=rain_total + snow_total,
-                    humidity=sum(rh_list) / len(rh_list) if rh_list else None,
-                    native_wind_speed=wind_max,
-                    native_wind_gust_speed=gust_max,
-                    is_daytime=True,
-                )
+            daily_entry = Forecast(
+                datetime=dt_day.isoformat(),
+                condition=cond,
+                native_temperature=t_max,
+                native_templow=t_min,
+                native_precipitation=rain_total + snow_total,
+                humidity=sum(rh_list) / len(rh_list) if rh_list else None,
+                native_wind_speed=wind_max,
+                native_wind_gust_speed=gust_max,
+                is_daytime=True,
             )
+            if snowlmt_min is not None:
+                daily_entry["snow_altitude"] = round(snowlmt_min)  # type: ignore[typeddict-unknown-key]
+            if cape_max is not None:
+                daily_entry["cape"] = round(cape_max)  # type: ignore[typeddict-unknown-key]
+            forecasts.append(daily_entry)
 
         return forecasts
 
