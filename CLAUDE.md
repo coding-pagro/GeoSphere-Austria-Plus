@@ -97,7 +97,7 @@ Beyond standard HA Forecast fields (`native_temperature`, `native_precipitation`
 - `test_coordinator.py` — Fibonacci-backoff retry, last-known-good caching.
 - `test_weather_entity.py` — condition derivation, hourly/daily forecast building, all forecast attributes (snow_altitude, cape, solar_irradiance, wind gust).
 - `test_sensor.py` — sensor descriptions, native_value extraction.
-- `test_conditions.py` — pure `nwp_to_condition` and `sy_to_condition` logic.
+- `test_conditions.py` — pure `nwp_to_condition` logic, including sy code mapping.
 - `test_air_quality.py` — AQI aggregation, EU-index breakpoints.
 - `test_warnings.py` — warnings parser, level aggregation.
 - `test_init.py` — entry setup, options-flow data flow.

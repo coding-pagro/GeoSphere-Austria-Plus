@@ -139,7 +139,7 @@ Die Condition wird aus den TAWES-Echtzeitdaten abgeleitet (Priorität höchste z
 
 Ist keine TAWES-Station konfiguriert, werden alle aktuellen Werte (Condition, Temperatur, Feuchte, Wind, Niederschlag) aus dem ersten verfügbaren Vorhersagepunkt abgeleitet. Taupunkt, Luftdruck und einzelne abgeleitete Felder bleiben leer, da die Modelle diese Größen nicht alle liefern.
 
-Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32 Codes inkl. Gewitter), sowie Wolkenbedeckung (`tcc`), Niederschlag (`rain_acc`, `snow_acc`) und Wind aus dem NWP-Modell verwendet. Erkennt das Modell innerhalb eines Tages mindestens eine Gewitter-Stunde (Symbolcode 26–32), wird der ganze Tag als `lightning-rainy` markiert.
+Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32 Codes inkl. Gewitter), sowie Wolkenbedeckung (`tcc`), Niederschlag (`rain_acc`, `snow_acc`) und Wind aus dem NWP-Modell verwendet. Bei stündlichen Vorhersagen wird `sy` direkt verwendet; für Tagesvorhersagen wird der ungünstigste (signifikanteste) `sy`-Code der Tagesstunden herangezogen. Akkumulierte Niederschlagssummen können die symbolbasierte Bedingung überschreiben, jedoch nicht `lightning-rainy` abstufen. Hohe Windgeschwindigkeiten (≥ 10 m/s) ergeben `windy` bzw. `windy-variant` bei klaren oder bewölkten Bedingungen.
 
 ---
 
