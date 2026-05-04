@@ -44,6 +44,11 @@ class _MockCoordinatorEntity:
     def __init__(self, coordinator):
         self.coordinator = coordinator
 
+    @property
+    def available(self) -> bool:
+        """Mirror real CoordinatorEntity: available when coordinator has data."""
+        return True
+
     async def async_added_to_hass(self):
         pass
 

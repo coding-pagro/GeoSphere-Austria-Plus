@@ -285,6 +285,22 @@ class TawesSensor(CoordinatorEntity[GeoSphereCurrentCoordinator], SensorEntity):
         self._attr_device_info = _make_device_info(entry_id, location_name)
 
     @property
+    def available(self) -> bool:
+        """Return False when the station does not provide this parameter at all.
+
+        Distinguishes two cases:
+        - param key absent from coordinator.data → station has no sensor for it →
+          entity shows as 'unavailable' (Nicht verfügbar)
+        - param key present but value is None → sensor exists but had a null reading →
+          entity shows as 'unknown' (Unbekannt)
+        """
+        if not getattr(super(), "available", True):
+            return False
+        if self.coordinator.data is None:
+            return False
+        return self.entity_description.param in self.coordinator.data
+
+    @property
     def native_value(self) -> float | None:
         if self.coordinator.data is None:
             return None

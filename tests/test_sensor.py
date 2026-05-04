@@ -1,4 +1,4 @@
-"""Tests für TawesSensor – Metadaten und native_value."""
+"""Tests for TawesSensor – metadata, availability, and native_value."""
 import pytest
 from unittest.mock import MagicMock
 
@@ -121,3 +121,48 @@ class TestNativeValue:
         coordinator.data = {}
         sensor = _make_sensor(coordinator, SENSORS[0])
         assert sensor.native_value is None
+
+
+# ---------------------------------------------------------------------------
+# Availability
+# ---------------------------------------------------------------------------
+
+class TestAvailability:
+    def test_available_when_param_in_data(self, coordinator):
+        """Sensor is available when its param key exists in coordinator.data."""
+        desc = next(d for d in SENSORS if d.key == "wind_gust")
+        sensor = _make_sensor(coordinator, desc)
+        # coordinator.available is a MagicMock truthy value by default
+        assert sensor.available is True
+
+    def test_unavailable_when_param_absent_from_data(self, coordinator):
+        """Station does not measure this parameter: key absent → unavailable."""
+        coordinator.data = {k: v for k, v in coordinator.data.items() if k != "FX"}
+        desc = next(d for d in SENSORS if d.key == "wind_gust")
+        sensor = _make_sensor(coordinator, desc)
+        assert sensor.available is False
+
+    def test_unavailable_when_no_data(self, coordinator):
+        """No data from API at all → unavailable."""
+        coordinator.data = None
+        sensor = _make_sensor(coordinator, SENSORS[0])
+        assert sensor.available is False
+
+    def test_available_but_none_when_param_present_with_null(self, coordinator):
+        """Param key exists in data but value is None: entity available, value unknown."""
+        coordinator.data = {"FX": None}
+        desc = next(d for d in SENSORS if d.key == "wind_gust")
+        sensor = _make_sensor(coordinator, desc)
+        assert sensor.available is True
+        assert sensor.native_value is None
+
+    def test_optional_sensors_unavailable_when_station_lacks_them(self, coordinator):
+        """SH and TB1 show unavailable when the station has no snow or soil sensor."""
+        data_without_optional = {
+            k: v for k, v in coordinator.data.items() if k not in ("SH", "TB1")
+        }
+        coordinator.data = data_without_optional
+        for key in ("snow_height", "soil_temperature_10cm"):
+            desc = next(d for d in SENSORS if d.key == key)
+            sensor = _make_sensor(coordinator, desc)
+            assert sensor.available is False, f"{key} should be unavailable"
