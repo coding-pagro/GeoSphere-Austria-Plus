@@ -57,8 +57,8 @@ _SUN_SECONDS_MAX = 600         # SO max. 600 s Sonnenschein je 10-Minuten-Interv
 _SY_CONDITION_MAP: dict[int, str] = {
     # Codes 1–2: Cloudless / Fair
     1: "sunny",
-    2: "sunny",
     # Codes 3–5: Cloudy variations
+    2: "partlycloudy",
     3: "partlycloudy",
     4: "cloudy",
     5: "cloudy",
@@ -99,12 +99,6 @@ _SY_CONDITION_MAP: dict[int, str] = {
     32: "lightning-rainy",
 }
 
-# Symbol codes that indicate night-time variants of clear/fair conditions.
-_SY_NIGHT_CODES = frozenset({1, 2})
-
-# Range of sy codes classified as thunderstorms (used for daily aggregation).
-_SY_THUNDERSTORM_RANGE = range(26, 33)
-
 
 def _coerce_sy(sy: Any) -> int | None:
     """Wandelt einen rohen sy-Wert robust in int um. Liefert None bei ungültigen Werten."""
@@ -116,27 +110,29 @@ def _coerce_sy(sy: Any) -> int | None:
         return None
 
 
-def _sy_in_thunderstorm_range(sy: Any) -> bool:
-    """True wenn sy einem Gewitter-Symbolcode (26–32) entspricht."""
-    code = _coerce_sy(sy)
-    return code is not None and code in _SY_THUNDERSTORM_RANGE
-
-
-def sy_to_condition(sy: int | float | None, is_day: bool) -> str | None:
-    """Mappe GeoSphere-Symbolcode (sy, 1–32) auf HA-Wetterbedingung.
-
-    Gibt None zurück wenn sy nicht bekannt ist.
-    Für klare Bedingungen (Codes 1–2) wird is_day berücksichtigt.
-    """
+def _base_condition_from_sy(sy: int | float | None) -> str | None:
+    """Rohe Bedingung aus GeoSphere-Symbolcode — ohne Wind- oder Nacht-Logik."""
     code = _coerce_sy(sy)
     if code is None:
         return None
-    condition = _SY_CONDITION_MAP.get(code)
-    if condition is None:
-        return None
-    if code in _SY_NIGHT_CODES and not is_day:
-        return "clear-night"
-    return condition
+    return _SY_CONDITION_MAP.get(code)
+
+
+def _base_condition_from_tcc(tcc: float | None, rain_mm: float, snow_mm: float) -> str:
+    """Rohe Bedingung aus tcc/Niederschlag — ohne Wind- oder Nacht-Logik."""
+    if snow_mm > 0.1 and rain_mm > 0.1:
+        return "snowy-rainy"
+    if snow_mm > 0.1:
+        return "snowy"
+    if rain_mm > 5.0:
+        return "pouring"
+    if rain_mm > 0.1:
+        return "rainy"
+    if tcc is None or tcc <= 0.5:
+        return "sunny"
+    if tcc <= 0.875:
+        return "partlycloudy"
+    return "cloudy"
 
 
 def nwp_to_condition(
@@ -147,40 +143,21 @@ def nwp_to_condition(
     is_day: bool,
     sy: int | float | None = None,
 ) -> str | None:
-    """Leite HA-Wetterbedingung aus NWP-Parametern ab.
+    """Leite HA-Wetterbedingung aus NWP-Parametern ab."""
+    base = _base_condition_from_sy(sy) if sy is not None else None
+    if base is None:
+        base = _base_condition_from_tcc(tcc, rain_mm, snow_mm)
 
-    Wenn der GeoSphere-Symbolcode (sy) verfügbar ist, wird er bevorzugt,
-    da er vom Modell direkt klassifizierte Bedingungen enthält (inkl. Gewitter).
-    Abgeleitete Bedingungen aus tcc/rain/snow dienen als Rückfall.
-    """
-    sy_cond = sy_to_condition(sy, is_day)
-    if sy_cond is not None:
-        return sy_cond
-
-    if snow_mm > 0.1 and rain_mm > 0.1:
-        return "snowy-rainy"
-    if snow_mm > 0.1:
-        return "snowy"
-    if rain_mm > 5.0:
-        return "pouring"
-    if rain_mm > 0.1:
-        return "rainy"
-    if tcc is None:
-        # Wolkenbedeckung nicht verfügbar (z. B. Nowcast)
-        if wind_ms > 10:
+    if wind_ms > _WIND_STRONG_MS:
+        if base == "sunny":
             return "windy"
-        return "sunny" if is_day else "clear-night"
-    if tcc > 0.875:
-        return "cloudy"
-    if tcc > 0.5:
-        if wind_ms > 10:
+        if base in ("partlycloudy", "cloudy"):
             return "windy-variant"
-        return "partlycloudy"
-    if wind_ms > 10:
-        return "windy"
-    if is_day:
-        return "sunny"
-    return "clear-night"
+
+    if base == "sunny" and not is_day:
+        return "clear-night"
+
+    return base
 
 
 async def async_setup_entry(
@@ -636,16 +613,20 @@ class GeoSphereWeatherEntity(
             ]
             gust_max = max(gust_speeds) if gust_speeds else None
 
-            # If any hourly entry has a thunderstorm symbol code, the whole
-            # day is classified as lightning-rainy (highest priority).
-            # sy is only present in NWP model output; skip for Ensemble/Nowcast.
-            has_thunderstorm = "nwp" in self._model and any(
-                _sy_in_thunderstorm_range(e.get("sy"))
-                for e in entries
-            )
+            # For NWP: use the worst-case sy code among daytime entries. Daytime-only
+            # filtering prevents clear-night hours (sy 1–2) from suppressing significant
+            # daytime conditions. Falls back to tcc/precip aggregate for Ensemble/Nowcast.
+            daytime_sy: list[int] = []
+            if "nwp" in self._model:
+                for e in entries:
+                    if self._entry_is_daytime(e):
+                        if (sy_val := _coerce_sy(e.get("sy"))) is not None:
+                            daytime_sy.append(sy_val)
 
-            if has_thunderstorm:
-                cond = "lightning-rainy"
+            if daytime_sy:
+                cond = nwp_to_condition(
+                    tcc_avg, 0.0, 0.0, wind_max or 0.0, True, max(daytime_sy)
+                )
             else:
                 # wind_max kann None sein (kein Wind-Vektor verfügbar) → 0.0 als Fallback
                 cond = nwp_to_condition(
@@ -655,9 +636,11 @@ class GeoSphereWeatherEntity(
                     wind_max or 0.0,
                     True,
                 )
-                # Reihenfolge ist beabsichtigt: bei gleichzeitigem Regen UND Schnee jeweils
-                # über 2 mm wird "snowy-rainy" bevorzugt — auch wenn rain_total > 10 mm wäre.
-                # Das ist semantisch informativer als "pouring", das den Schneeanteil verdeckt.
+            # Accumulated precipitation overrides the symbol-code condition, but must
+            # not downgrade lightning-rainy (already the highest-priority outcome).
+            # Reihenfolge ist beabsichtigt: bei gleichzeitigem Regen UND Schnee jeweils
+            # über 2 mm wird "snowy-rainy" bevorzugt — auch wenn rain_total > 10 mm wäre.
+            if cond != "lightning-rainy":
                 if rain_total > 2.0 and snow_total > 2.0:
                     cond = "snowy-rainy"
                 elif rain_total > 10.0:
@@ -701,6 +684,17 @@ class GeoSphereWeatherEntity(
     def _is_dt_daytime(self, dt: datetime) -> bool:
         local_hour = (dt.hour + self._lon / 15.0) % 24
         return 6.0 <= local_hour < 21.0
+
+    def _entry_is_daytime(self, entry: dict) -> bool:
+        """Return True if the entry's datetime timestamp falls in daytime hours."""
+        ts = entry.get("datetime")
+        if not ts:
+            return False
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return self._is_dt_daytime(dt)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

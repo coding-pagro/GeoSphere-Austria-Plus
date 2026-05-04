@@ -763,11 +763,45 @@ class TestBuildDailyForecasts:
     def test_thunderstorm_overrides_heavy_rain(self, entity, current_coord, forecast_coord):
         """Thunderstorm takes priority even over a heavy-rain day."""
         current_coord.data = {}
-        entries = self._acc_entries(day_offset=1, rain_total=12.0)
-        entries[0]["sy"] = 27
+        # Use 24-hour entries so daytime hours are present; put thunderstorm at hour 14.
+        entries = self._day_entries(day_offset=1, count=24, rain_acc=0.5)  # 12 mm total
+        entries[14]["sy"] = 27  # hour 14 UTC → daytime with lon=16.37
         forecast_coord.data = entries
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "lightning-rainy"
+
+    def test_daytime_sy_overrides_low_tcc_average(self, entity, current_coord, forecast_coord):
+        """Bug fix: when night tcc=0 drags down the 24h average, daytime sy still wins.
+
+        Concrete failing scenario: daytime hours all have sy=4 (cloudy) but the
+        24h tcc average falls below 0.5 due to clear-night hours → old code returns
+        'sunny', new code returns 'cloudy'.
+        """
+        current_coord.data = {}
+        base_dt = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        entries = []
+        for i in range(24):
+            dt = base_dt + timedelta(hours=i)
+            # Vienna (lon=16.37): daytime UTC hours ≈ 5–19; night: 0–4, 20–23
+            is_day_approx = 5 <= i < 20
+            entries.append({
+                "datetime": dt.isoformat(),
+                "t2m": 15.0,
+                "rain_acc": 0.0,
+                "snow_acc": 0.0,
+                "rh2m": 60.0,
+                "u10m": 2.0,
+                "v10m": 2.0,
+                "tcc": 0.75 if is_day_approx else 0.0,
+                "sy": 4 if is_day_approx else 1,
+            })
+        forecast_coord.data = entries
+        # 24h tcc average ≈ 0.47 → old code: sunny (wrong); new code: cloudy (correct)
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "cloudy"
 
     def test_thunderstorm_sy_as_float_is_handled(self, entity, current_coord, forecast_coord):
         """Robustness: sy delivered as float (e.g. 26.0) still triggers lightning-rainy."""
