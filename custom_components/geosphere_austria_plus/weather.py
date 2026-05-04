@@ -101,7 +101,7 @@ _SY_CONDITION_MAP: dict[int, str] = {
 
 
 def _coerce_sy(sy: Any) -> int | None:
-    """Wandelt einen rohen sy-Wert robust in int um. Liefert None bei ungültigen Werten."""
+    """Coerce a raw sy value to int. Returns None for invalid or missing values."""
     if sy is None:
         return None
     try:
@@ -111,7 +111,7 @@ def _coerce_sy(sy: Any) -> int | None:
 
 
 def _base_condition_from_sy(sy: int | float | None) -> str | None:
-    """Rohe Bedingung aus GeoSphere-Symbolcode — ohne Wind- oder Nacht-Logik."""
+    """Derive base HA condition from GeoSphere symbol code — no wind or night logic."""
     code = _coerce_sy(sy)
     if code is None:
         return None
@@ -119,7 +119,7 @@ def _base_condition_from_sy(sy: int | float | None) -> str | None:
 
 
 def _base_condition_from_tcc(tcc: float | None, rain_mm: float, snow_mm: float) -> str:
-    """Rohe Bedingung aus tcc/Niederschlag — ohne Wind- oder Nacht-Logik."""
+    """Derive base HA condition from cloud cover and precipitation — no wind or night logic."""
     if snow_mm > 0.1 and rain_mm > 0.1:
         return "snowy-rainy"
     if snow_mm > 0.1:
@@ -143,7 +143,7 @@ def nwp_to_condition(
     is_day: bool,
     sy: int | float | None = None,
 ) -> str | None:
-    """Leite HA-Wetterbedingung aus NWP-Parametern ab."""
+    """Derive HA weather condition from NWP parameters."""
     base = _base_condition_from_sy(sy) if sy is not None else None
     if base is None:
         base = _base_condition_from_tcc(tcc, rain_mm, snow_mm)
@@ -638,8 +638,8 @@ class GeoSphereWeatherEntity(
                 )
             # Accumulated precipitation overrides the symbol-code condition, but must
             # not downgrade lightning-rainy (already the highest-priority outcome).
-            # Reihenfolge ist beabsichtigt: bei gleichzeitigem Regen UND Schnee jeweils
-            # über 2 mm wird "snowy-rainy" bevorzugt — auch wenn rain_total > 10 mm wäre.
+            # Order is intentional: simultaneous rain AND snow above 2 mm each prefers
+            # "snowy-rainy" over "pouring" — more informative when snow is involved.
             if cond != "lightning-rainy":
                 if rain_total > 2.0 and snow_total > 2.0:
                     cond = "snowy-rainy"
