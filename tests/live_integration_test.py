@@ -32,19 +32,25 @@ _const_mod.UnitOfPressure.HPA = "hPa"
 _const_mod.UnitOfSpeed.METERS_PER_SECOND = "m/s"
 _const_mod.UnitOfLength.MILLIMETERS = "mm"
 
-sys.modules.update({
-    "homeassistant": MagicMock(),
-    "homeassistant.components": MagicMock(),
-    "homeassistant.components.weather": MagicMock(),
-    "homeassistant.config_entries": MagicMock(),
-    "homeassistant.const": _const_mod,
-    "homeassistant.core": MagicMock(),
-    "homeassistant.helpers": MagicMock(),
-    "homeassistant.helpers.aiohttp_client": MagicMock(),
-    "homeassistant.helpers.entity_platform": MagicMock(),
-    "homeassistant.helpers.update_coordinator": _coordinator_mod,
-    "voluptuous": MagicMock(),
-})
+# Only install mocks when running as a standalone script.  When pytest
+# imports this file during collection (it matches *_test.py) the HA stubs
+# are already in sys.modules via tests/conftest.py; overwriting them would
+# replace _MockDataUpdateCoordinator with this file's leaner version (which
+# omits self.hass) and corrupt every coordinator test that runs afterwards.
+if "homeassistant.helpers.update_coordinator" not in sys.modules:
+    sys.modules.update({
+        "homeassistant": MagicMock(),
+        "homeassistant.components": MagicMock(),
+        "homeassistant.components.weather": MagicMock(),
+        "homeassistant.config_entries": MagicMock(),
+        "homeassistant.const": _const_mod,
+        "homeassistant.core": MagicMock(),
+        "homeassistant.helpers": MagicMock(),
+        "homeassistant.helpers.aiohttp_client": MagicMock(),
+        "homeassistant.helpers.entity_platform": MagicMock(),
+        "homeassistant.helpers.update_coordinator": _coordinator_mod,
+        "voluptuous": MagicMock(),
+    })
 
 import aiohttp
 import ssl
