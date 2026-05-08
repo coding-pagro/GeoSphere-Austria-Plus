@@ -625,22 +625,43 @@ class GeoSphereWeatherEntity(
             ]
             gust_max = max(gust_speeds) if gust_speeds else None
 
-            # For NWP: use the worst-case sy code among daytime entries. Daytime-only
-            # filtering prevents clear-night hours (sy 1–2) from suppressing significant
-            # daytime conditions. Falls back to tcc/precip aggregate for Ensemble/Nowcast.
+            # For NWP: select daily condition from daytime sy codes and daytime tcc.
+            # Daytime-only filtering prevents clear-night hours from suppressing
+            # significant daytime conditions. Falls back to tcc/precip aggregate
+            # for Ensemble/Nowcast.
             daytime_sy: list[int] = []
+            tcc_daytime_list: list[float] = []
             if "nwp" in self._model:
                 for e in entries:
                     if self._entry_is_daytime(e):
                         if (sy_val := _coerce_sy(e.get("sy"))) is not None:
                             daytime_sy.append(sy_val)
+                        if (tcc_val := e.get("tcc")) is not None:
+                            tcc_daytime_list.append(float(tcc_val))
 
             if daytime_sy:
-                cond = nwp_to_condition(
-                    tcc_avg, 0.0, 0.0, wind_max or 0.0, True, max(daytime_sy)
-                )
+                max_sy = max(daytime_sy)
+                if max_sy >= 8:
+                    # At least one daytime hour carries a precipitation or thunderstorm
+                    # code. Use the worst code so significant events are not hidden by
+                    # surrounding clear hours. The precipitation-total overrides below
+                    # further refine rain/snow totals.
+                    cond = nwp_to_condition(tcc_avg, 0.0, 0.0, wind_max or 0.0, True, max_sy)
+                else:
+                    # All daytime codes are cloud/fog only (1–7). Averaging daytime tcc
+                    # gives a more representative daily condition than the worst-case sy
+                    # code: a few overcast afternoon hours should not override an otherwise
+                    # sunny day. Consistent with Pirate Weather / NWS / Meteoblue practice
+                    # of averaging cloud cover rather than maximising it for non-precipitation
+                    # days. Daytime-only tcc prevents clear nights from dragging it down.
+                    tcc_day = (
+                        sum(tcc_daytime_list) / len(tcc_daytime_list)
+                        if tcc_daytime_list
+                        else tcc_avg
+                    )
+                    cond = nwp_to_condition(tcc_day, 0.0, 0.0, wind_max or 0.0, True)
             else:
-                # wind_max kann None sein (kein Wind-Vektor verfügbar) → 0.0 als Fallback
+                # wind_max may be None (no wind vector available) → 0.0 as fallback
                 cond = nwp_to_condition(
                     tcc_avg,
                     rain_total / max(len(entries), 1),
