@@ -1389,3 +1389,194 @@ class TestSupportedFeatures:
         nwp = _make_entity("nwp-v1-1h-2500m", current_coord, forecast_coord)
         nowcast = _make_entity("nowcast-v1-15min-1km", current_coord, forecast_coord)
         assert (nwp.supported_features & nowcast.supported_features) == nowcast.supported_features
+
+
+# ---------------------------------------------------------------------------
+# _resolve_tcc_for_nowcast – cloud-cover fallback chain
+# ---------------------------------------------------------------------------
+
+def _nowcast_entity(current_coord, nowcast_coord, all_coords=None):
+    """Helper: build a Nowcast entity with an optional all_forecast_coordinators dict."""
+    return GeoSphereWeatherEntity(
+        current_coordinator=current_coord,
+        forecast_coordinator=nowcast_coord,
+        entry_id="test_entry",
+        model="nowcast-v1-15min-1km",
+        location_name="Test",
+        lon=16.37,
+        all_forecast_coordinators=all_coords or {},
+    )
+
+
+def _nwp_entry_with_tcc(hours_ahead: float, tcc: float) -> dict:
+    dt = datetime.now(timezone.utc) + timedelta(hours=hours_ahead)
+    return {"datetime": dt.isoformat(), "tcc": tcc}
+
+
+class TestResolveTccForNowcast:
+    """Unit-Tests für GeoSphereWeatherEntity._resolve_tcc_for_nowcast."""
+
+    # ── 4. No sources ──────────────────────────────────────────────────────
+
+    def test_returns_none_when_no_sources(self):
+        coord = MagicMock()
+        coord.data = None
+        entity = _nowcast_entity(None, coord, {})
+        dt = datetime.now(timezone.utc) + timedelta(minutes=30)
+        assert entity._resolve_tcc_for_nowcast(dt) is None
+
+    # ── 3. TAWES only ─────────────────────────────────────────────────────
+
+    def test_tawes_only_full_sun(self):
+        """SO=600 (full sun) → tcc_proxy = 0.0."""
+        current = MagicMock()
+        current.data = {"SO": 600}
+        entity = _nowcast_entity(current, MagicMock(), {})
+        result = entity._resolve_tcc_for_nowcast(
+            datetime.now(timezone.utc) + timedelta(minutes=30)
+        )
+        assert result == pytest.approx(0.0)
+
+    def test_tawes_only_overcast(self):
+        """SO=0 (no sun) → tcc_proxy = 1.0."""
+        current = MagicMock()
+        current.data = {"SO": 0}
+        entity = _nowcast_entity(current, MagicMock(), {})
+        result = entity._resolve_tcc_for_nowcast(
+            datetime.now(timezone.utc) + timedelta(minutes=30)
+        )
+        assert result == pytest.approx(1.0)
+
+    def test_tawes_only_half_covered(self):
+        """SO=300 (half sun) → tcc_proxy = 0.5."""
+        current = MagicMock()
+        current.data = {"SO": 300}
+        entity = _nowcast_entity(current, MagicMock(), {})
+        result = entity._resolve_tcc_for_nowcast(
+            datetime.now(timezone.utc) + timedelta(minutes=30)
+        )
+        assert result == pytest.approx(0.5)
+
+    def test_tawes_only_so_missing_returns_none(self):
+        """SO not in TAWES data → no proxy → None."""
+        current = MagicMock()
+        current.data = {"TL": 18.0}  # no SO key
+        entity = _nowcast_entity(current, MagicMock(), {})
+        result = entity._resolve_tcc_for_nowcast(
+            datetime.now(timezone.utc) + timedelta(minutes=30)
+        )
+        assert result is None
+
+    def test_tawes_only_constant_across_timesteps(self):
+        """Without NWP, the same tcc_proxy is returned for all future timesteps."""
+        current = MagicMock()
+        current.data = {"SO": 0}  # overcast
+        entity = _nowcast_entity(current, MagicMock(), {})
+        t1 = entity._resolve_tcc_for_nowcast(datetime.now(timezone.utc) + timedelta(minutes=15))
+        t2 = entity._resolve_tcc_for_nowcast(datetime.now(timezone.utc) + timedelta(hours=2))
+        assert t1 == pytest.approx(t2)
+
+    # ── 2. NWP only ───────────────────────────────────────────────────────
+
+    def test_nwp_only_returns_nearest_tcc(self):
+        """NWP coordinator present, no TAWES → returns NWP tcc for nearest entry."""
+        nwp_coord = MagicMock()
+        nwp_coord.data = [
+            _nwp_entry_with_tcc(1, 0.2),
+            _nwp_entry_with_tcc(2, 0.9),
+        ]
+        entity = _nowcast_entity(None, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        dt = datetime.now(timezone.utc) + timedelta(minutes=50)  # closer to +1h
+        result = entity._resolve_tcc_for_nowcast(dt)
+        assert result == pytest.approx(0.2)
+
+    def test_nwp_only_picks_closest_entry(self):
+        """NWP entry selection uses nearest timestamp, not first."""
+        nwp_coord = MagicMock()
+        nwp_coord.data = [
+            _nwp_entry_with_tcc(1, 0.1),
+            _nwp_entry_with_tcc(2, 0.8),
+        ]
+        entity = _nowcast_entity(None, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        dt = datetime.now(timezone.utc) + timedelta(minutes=90)  # exactly between → +2h wins
+        result = entity._resolve_tcc_for_nowcast(dt)
+        assert result in (pytest.approx(0.1), pytest.approx(0.8))  # either is valid for tie
+
+    def test_nwp_only_no_data_returns_none(self):
+        """NWP coordinator exists but has no data → falls back to None."""
+        nwp_coord = MagicMock()
+        nwp_coord.data = None
+        entity = _nowcast_entity(None, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        result = entity._resolve_tcc_for_nowcast(
+            datetime.now(timezone.utc) + timedelta(minutes=30)
+        )
+        assert result is None
+
+    # ── 1. NWP + TAWES blend ──────────────────────────────────────────────
+
+    def test_blend_at_t0_is_tawes(self):
+        """At t=now the result should equal tcc_tawes (w_nwp=0)."""
+        current = MagicMock()
+        current.data = {"SO": 0}  # tcc_tawes = 1.0
+        nwp_coord = MagicMock()
+        nwp_coord.data = [_nwp_entry_with_tcc(0, 0.0)]  # tcc_nwp = 0.0
+        entity = _nowcast_entity(current, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        result = entity._resolve_tcc_for_nowcast(datetime.now(timezone.utc))
+        assert result == pytest.approx(1.0, abs=0.05)  # close to TAWES at t=0
+
+    def test_blend_at_3h_is_nwp(self):
+        """At t=3h the result should equal tcc_nwp (w_nwp=1)."""
+        current = MagicMock()
+        current.data = {"SO": 0}  # tcc_tawes = 1.0
+        nwp_coord = MagicMock()
+        nwp_coord.data = [_nwp_entry_with_tcc(3, 0.2)]  # tcc_nwp = 0.2
+        entity = _nowcast_entity(current, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        dt = datetime.now(timezone.utc) + timedelta(hours=3)
+        result = entity._resolve_tcc_for_nowcast(dt)
+        assert result == pytest.approx(0.2, abs=0.05)  # close to NWP at t=3h
+
+    def test_blend_midpoint_is_average(self):
+        """At t=1.5h (halfway) the result should be the mean of tcc_tawes and tcc_nwp."""
+        current = MagicMock()
+        current.data = {"SO": 0}   # tcc_tawes = 1.0
+        nwp_coord = MagicMock()
+        nwp_coord.data = [_nwp_entry_with_tcc(2, 0.0)]  # tcc_nwp = 0.0
+        entity = _nowcast_entity(current, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        dt = datetime.now(timezone.utc) + timedelta(hours=1, minutes=30)
+        result = entity._resolve_tcc_for_nowcast(dt)
+        assert result == pytest.approx(0.5, abs=0.05)
+
+    def test_blend_increases_when_nwp_cloudier(self):
+        """Result should be monotonically increasing when NWP > TAWES."""
+        current = MagicMock()
+        current.data = {"SO": 600}  # tcc_tawes = 0.0 (clear)
+        nwp_coord = MagicMock()
+        nwp_coord.data = [_nwp_entry_with_tcc(3, 1.0)]  # tcc_nwp = 1.0 (overcast)
+        entity = _nowcast_entity(current, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        times = [datetime.now(timezone.utc) + timedelta(minutes=m) for m in [15, 60, 120, 180]]
+        results = [entity._resolve_tcc_for_nowcast(t) for t in times]
+        assert results == sorted(results)
+
+    # ── Integration: hourly forecasts use resolved tcc ─────────────────────
+
+    def test_nowcast_hourly_condition_uses_resolved_tcc(self):
+        """End-to-end: Nowcast hourly forecast shows 'cloudy' when TAWES says overcast."""
+        current = MagicMock()
+        current.data = {"SO": 0}  # overcast
+        nowcast_coord = MagicMock()
+        dt = datetime.now(timezone.utc) + timedelta(minutes=30)
+        nowcast_coord.data = [{"datetime": dt.isoformat(), "t2m": 15.0, "rh2m": 80.0}]
+        entity = _nowcast_entity(current, nowcast_coord, {})
+        forecasts = entity._build_hourly_forecasts()
+        assert len(forecasts) == 1
+        assert forecasts[0]["condition"] in ("cloudy", "partlycloudy", "windy-variant")
+
+    def test_nowcast_hourly_condition_sunny_without_sources(self):
+        """Without TAWES or NWP, Nowcast falls back to sunny/clear-night (existing behaviour)."""
+        nowcast_coord = MagicMock()
+        dt = datetime.now(timezone.utc) + timedelta(minutes=30)
+        nowcast_coord.data = [{"datetime": dt.isoformat(), "t2m": 15.0}]
+        entity = _nowcast_entity(None, nowcast_coord, {})
+        forecasts = entity._build_hourly_forecasts()
+        assert len(forecasts) == 1
+        assert forecasts[0]["condition"] in ("sunny", "clear-night")
