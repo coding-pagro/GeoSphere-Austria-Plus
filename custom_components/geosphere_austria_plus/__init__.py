@@ -82,7 +82,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     enable_open_meteo: bool = entry.options.get(
         CONF_ENABLE_OPEN_METEO,
-        entry.data.get(CONF_ENABLE_OPEN_METEO, True),
+        entry.data.get(CONF_ENABLE_OPEN_METEO, False),
     )
 
     coordinators: dict = {DATA_FORECASTS: {}}
