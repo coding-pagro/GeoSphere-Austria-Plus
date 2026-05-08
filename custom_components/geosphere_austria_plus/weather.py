@@ -190,14 +190,17 @@ async def async_setup_entry(
 
     current_coordinator: GeoSphereCurrentCoordinator | None = coordinators.get(DATA_CURRENT)
 
+    all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] = coordinators[DATA_FORECASTS]
+
     entities = [
         GeoSphereWeatherEntity(
             current_coordinator=current_coordinator,
-            forecast_coordinator=coordinators[DATA_FORECASTS][model],
+            forecast_coordinator=all_forecast_coordinators[model],
             entry_id=entry_id,
             model=model,
             location_name=location_name,
             lon=lon,
+            all_forecast_coordinators=all_forecast_coordinators,
         )
         for model in models
     ]
@@ -235,11 +238,17 @@ class GeoSphereWeatherEntity(
         model: str,
         location_name: str,
         lon: float = 14.0,
+        all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] | None = None,
     ) -> None:
         super().__init__(forecast_coordinator)
         self._current_coordinator = current_coordinator
         self._model = model
         self._lon = lon
+        # All active forecast coordinators keyed by model name.
+        # Used by Nowcast entities to resolve cloud-cover (tcc) from NWP data.
+        self._all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] = (
+            all_forecast_coordinators or {}
+        )
         self._attr_unique_id = f"geosphere_plus_{entry_id}_{model}"
 
         self._attr_name = FORECAST_MODEL_LABELS.get(model, model)
@@ -504,6 +513,9 @@ class GeoSphereWeatherEntity(
             ugust = entry.get("ugust")
             vgust = entry.get("vgust")
             tcc = entry.get("tcc")
+            # Nowcast never provides tcc; resolve from NWP/TAWES blend when available.
+            if tcc is None and "nowcast" in self._model:
+                tcc = self._resolve_tcc_for_nowcast(dt)
             wind_speed = math.sqrt(u10**2 + v10**2)
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
             if ugust is not None and vgust is not None:
@@ -676,6 +688,82 @@ class GeoSphereWeatherEntity(
             forecasts.append(daily_entry)
 
         return forecasts
+
+    # ------------------------------------------------------------------
+    # Nowcast tcc resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_tcc_for_nowcast(self, dt: datetime) -> float | None:
+        """Resolve cloud-cover fraction (0–1) for a Nowcast timestep.
+
+        Nowcast provides no tcc (cloud cover) parameter.  To avoid all
+        Nowcast forecast tiles defaulting to "sunny", we derive tcc from
+        the best available external source using the following priority:
+
+        1. NWP + TAWES both available
+           → time-weighted blend: at t=now 100 % TAWES ground-truth,
+             fading linearly to 100 % NWP over the 3-hour Nowcast horizon.
+             This gives a smooth transition that honours the current sky
+             state while following the model's cloud trend.
+
+        2. NWP only (no TAWES station configured)
+           → NWP tcc for the nearest hourly timestep, used as-is.
+
+        3. TAWES only (no NWP model active)
+           → constant proxy derived from TAWES sunshine duration SO:
+             tcc_proxy = 1 − SO / 600.  Kept constant because we have
+             no directional information; better than "always sunny".
+
+        4. Neither available
+           → returns None → caller falls through to sunny/clear-night.
+        """
+        now = datetime.now(timezone.utc)
+        _NOWCAST_HORIZON_S = 3 * 3600  # 3 hours in seconds
+
+        # ── 1. NWP tcc for this timestep ──────────────────────────────
+        tcc_nwp: float | None = None
+        for name, coord in self._all_forecast_coordinators.items():
+            if "nwp" not in name:
+                continue
+            if not coord.data:
+                continue
+            try:
+                nearest = min(
+                    coord.data,
+                    key=lambda e: abs(
+                        (
+                            datetime.fromisoformat(
+                                e["datetime"].replace("Z", "+00:00")
+                            )
+                            - dt
+                        ).total_seconds()
+                    ),
+                )
+                tcc_nwp = nearest.get("tcc")
+            except (ValueError, KeyError, TypeError):
+                pass
+            break  # use the first matching NWP coordinator
+
+        # ── 2. TAWES-derived tcc proxy ─────────────────────────────────
+        tcc_tawes: float | None = None
+        if self._current_coordinator and self._current_coordinator.data:
+            so = self._current_coordinator.data.get("SO")
+            if so is not None:
+                tcc_tawes = 1.0 - min(float(so) / _SUN_SECONDS_MAX, 1.0)
+
+        # ── 3. Blend / fallback ────────────────────────────────────────
+        if tcc_nwp is not None and tcc_tawes is not None:
+            elapsed = max((dt - now).total_seconds(), 0.0)
+            w_nwp = min(elapsed / _NOWCAST_HORIZON_S, 1.0)
+            return (1.0 - w_nwp) * tcc_tawes + w_nwp * tcc_nwp
+
+        if tcc_nwp is not None:
+            return tcc_nwp
+
+        if tcc_tawes is not None:
+            return tcc_tawes
+
+        return None
 
     # ------------------------------------------------------------------
     # Hilfsmethoden
