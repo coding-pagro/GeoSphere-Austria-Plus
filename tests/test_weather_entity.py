@@ -1,7 +1,7 @@
 """Tests for GeoSphereWeatherEntity – condition derivation and forecast building."""
 import math
 import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.geosphere_austria_plus.weather import GeoSphereWeatherEntity
@@ -1651,3 +1651,223 @@ class TestResolveTccForNowcast:
         forecasts = entity._build_hourly_forecasts()
         assert len(forecasts) == 1
         assert forecasts[0]["condition"] in ("sunny", "clear-night")
+
+
+# ---------------------------------------------------------------------------
+# _build_daily_forecasts – Open-Meteo blending
+# ---------------------------------------------------------------------------
+
+def _om_coordinator(days: list[dict]) -> MagicMock:
+    coord = MagicMock()
+    coord.data = days
+    return coord
+
+
+def _om_day(offset: int, condition: str = "sunny", t_max: float = 22.0) -> dict:
+    """Build a minimal Open-Meteo daily entry (as returned by fetch_open_meteo_daily)."""
+    d = date.today() + timedelta(days=offset)
+    dt_utc = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    return {
+        "datetime": dt_utc.isoformat(),
+        "condition": condition,
+        "native_temperature": t_max,
+        "native_templow": t_max - 10.0,
+        "native_precipitation": 0.0,
+        "is_daytime": True,
+    }
+
+
+class TestBuildDailyForecastsWithOpenMeteo:
+    """Verify the GeoSphere + Open-Meteo blending logic in _build_daily_forecasts."""
+
+    def _entity_with_om(self, forecast_coord, om_coord, lon: float = 16.37):
+        return GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="test_entry",
+            model="nwp-v1-1h-2500m",
+            location_name="Test",
+            lon=lon,
+            open_meteo_coordinator=om_coord,
+        )
+
+    def _gs_day_entries(self, day_offset: int, count: int = 24) -> list[dict]:
+        """Generate `count` hourly NWP entries starting at midnight UTC on day+offset."""
+        base = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=day_offset)
+        )
+        return [
+            {
+                "datetime": (base + timedelta(hours=i)).isoformat(),
+                "t2m": 15.0,
+                "rain_acc": 0.0,
+                "snow_acc": 0.0,
+                "rh2m": 65.0,
+                "u10m": 1.0,
+                "v10m": 0.0,
+                "tcc": 0.3,
+            }
+            for i in range(count)
+        ]
+
+    def test_gs_complete_day_preferred_over_om(self, forecast_coord):
+        """A GeoSphere day with ≥17h local coverage wins over the OM entry for that date."""
+        om = _om_coordinator([_om_day(1, condition="pouring")])
+        entity = self._entity_with_om(forecast_coord, om)
+        # 24 entries → last local hour ≈ 24 → complete
+        forecast_coord.data = self._gs_day_entries(day_offset=1, count=24)
+
+        forecasts = entity._build_daily_forecasts()
+
+        tomorrow_key = (date.today() + timedelta(days=1)).isoformat()
+        match = [f for f in forecasts if f["datetime"].startswith(tomorrow_key)]
+        assert len(match) == 1
+        # GeoSphere's condition (cloudy/sunny/etc) was used, not "pouring" from OM
+        assert match[0]["condition"] != "pouring"
+
+    def test_incomplete_gs_day_falls_through_to_om(self, forecast_coord):
+        """A day with GeoSphere coverage only until 11:00 UTC (local ≈12h) uses OM."""
+        # 12 entries: hours 0-11 UTC. lon=16.37 → local ≈ 12.09 < 17 → incomplete.
+        forecast_coord.data = self._gs_day_entries(day_offset=1, count=12)
+        om = _om_coordinator([_om_day(1, condition="pouring")])
+        entity = self._entity_with_om(forecast_coord, om)
+
+        forecasts = entity._build_daily_forecasts()
+
+        tomorrow_key = (date.today() + timedelta(days=1)).isoformat()
+        match = [f for f in forecasts if f["datetime"].startswith(tomorrow_key)]
+        assert len(match) == 1
+        assert match[0]["condition"] == "pouring"
+
+    def test_today_always_uses_gs_even_with_one_entry(self, forecast_coord):
+        """Today's GeoSphere data is always preferred, regardless of coverage hour."""
+        # Single recent entry (30 min ago) — passes the recency filter and represents today.
+        # Local hour well below 17, but today is always kept from GS.
+        base = datetime.now(timezone.utc) - timedelta(minutes=30)
+        forecast_coord.data = [{
+            "datetime": base.isoformat(),
+            "t2m": 20.0,
+            "rain_acc": 0.0, "snow_acc": 0.0,
+            "rh2m": 60.0, "u10m": 0.0, "v10m": 0.0, "tcc": 0.3,
+        }]
+        om = _om_coordinator([_om_day(0, condition="pouring")])
+        entity = self._entity_with_om(forecast_coord, om)
+
+        forecasts = entity._build_daily_forecasts()
+
+        today_key = date.today().isoformat()
+        match = [f for f in forecasts if f["datetime"].startswith(today_key)]
+        assert len(match) == 1
+        assert match[0]["condition"] != "pouring"
+
+    def test_all_days_from_om_when_gs_absent(self, forecast_coord):
+        """When GeoSphere has no data, all days come from Open-Meteo."""
+        forecast_coord.data = []
+        om = _om_coordinator([_om_day(i, condition="sunny") for i in range(7)])
+        entity = self._entity_with_om(forecast_coord, om)
+
+        forecasts = entity._build_daily_forecasts()
+
+        assert len(forecasts) == 7
+        assert all(f["condition"] == "sunny" for f in forecasts)
+
+    def test_capped_at_14_days(self, forecast_coord):
+        """Result never exceeds 14 entries regardless of OM data size."""
+        forecast_coord.data = []
+        om = _om_coordinator([_om_day(i) for i in range(20)])
+        entity = self._entity_with_om(forecast_coord, om)
+
+        forecasts = entity._build_daily_forecasts()
+
+        assert len(forecasts) <= 14
+
+    def test_gs_only_without_om_coordinator_unchanged(self, forecast_coord):
+        """Without OM coordinator, behaviour is the same as before (≤7 GS days)."""
+        all_entries: list[dict] = []
+        for d in range(1, 11):
+            all_entries.extend(self._gs_day_entries(day_offset=d))
+        forecast_coord.data = all_entries
+        entity = GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="test",
+            model="nwp-v1-1h-2500m",
+            location_name="Test",
+            lon=16.37,
+            # no open_meteo_coordinator
+        )
+
+        forecasts = entity._build_daily_forecasts()
+
+        assert len(forecasts) <= 7
+
+    def test_om_absent_returns_gs_days(self, forecast_coord):
+        """When OM coordinator has no data, result is GS days only (no crash)."""
+        forecast_coord.data = self._gs_day_entries(day_offset=1, count=24)
+        om = _om_coordinator([])  # empty data
+        entity = self._entity_with_om(forecast_coord, om)
+
+        forecasts = entity._build_daily_forecasts()
+
+        assert len(forecasts) == 1
+
+    def test_tail_days_filled_by_om(self, forecast_coord):
+        """Days beyond GeoSphere's ~3-day horizon come from Open-Meteo."""
+        # GS covers only day+1 (complete)
+        forecast_coord.data = self._gs_day_entries(day_offset=1, count=24)
+        # OM covers days 1-10
+        om = _om_coordinator([_om_day(i, condition="cloudy") for i in range(1, 11)])
+        entity = self._entity_with_om(forecast_coord, om)
+
+        forecasts = entity._build_daily_forecasts()
+
+        # day+1: GeoSphere (not "cloudy" from OM)
+        day1 = (date.today() + timedelta(days=1)).isoformat()
+        day1_entries = [f for f in forecasts if f["datetime"].startswith(day1)]
+        assert day1_entries[0]["condition"] != "cloudy"
+
+        # days 2+ should come from OM and be "cloudy"
+        day2 = (date.today() + timedelta(days=2)).isoformat()
+        day2_entries = [f for f in forecasts if f["datetime"].startswith(day2)]
+        if day2_entries:
+            assert day2_entries[0]["condition"] == "cloudy"
+
+
+# ---------------------------------------------------------------------------
+# attribution property
+# ---------------------------------------------------------------------------
+
+class TestAttribution:
+    def test_attribution_without_om_returns_geosphere_only(self, entity):
+        assert "GeoSphere" in entity.attribution
+        assert "Open-Meteo" not in entity.attribution
+
+    def test_attribution_with_om_data_includes_open_meteo(self, forecast_coord):
+        om = _om_coordinator([_om_day(1)])
+        ent = GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="x",
+            model="nwp-v1-1h-2500m",
+            location_name="Test",
+            lon=16.0,
+            open_meteo_coordinator=om,
+        )
+        assert "Open-Meteo" in ent.attribution
+
+    def test_attribution_with_om_coordinator_but_no_data_returns_geosphere_only(
+        self, forecast_coord
+    ):
+        om = _om_coordinator([])
+        om.data = None
+        ent = GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="x",
+            model="nwp-v1-1h-2500m",
+            location_name="Test",
+            lon=16.0,
+            open_meteo_coordinator=om,
+        )
+        assert "Open-Meteo" not in ent.attribution

@@ -17,10 +17,12 @@ from .const import (
     CONF_LONGITUDE,
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
+    CONF_ENABLE_OPEN_METEO,
     DATA_CURRENT,
     DATA_FORECASTS,
     DATA_WARNINGS,
     DATA_AIR_QUALITY,
+    DATA_OPEN_METEO_DAILY,
     DEFAULT_FORECAST_MODEL,
 )
 from .coordinator import (
@@ -28,6 +30,7 @@ from .coordinator import (
     GeoSphereForecastCoordinator,
     GeoSphereWarningsCoordinator,
     GeoSphereAirQualityCoordinator,
+    GeoSphereOpenMeteoDailyCoordinator,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,6 +80,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_ENABLE_AIR_QUALITY,
         entry.data.get(CONF_ENABLE_AIR_QUALITY, True),
     )
+    enable_open_meteo: bool = entry.options.get(
+        CONF_ENABLE_OPEN_METEO,
+        entry.data.get(CONF_ENABLE_OPEN_METEO, True),
+    )
 
     coordinators: dict = {DATA_FORECASTS: {}}
 
@@ -121,6 +128,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ConfigEntryNotReady as err:
             _LOGGER.warning(
                 "Schadstoff-API nicht erreichbar: %s – Integration läuft ohne Luftqualitätsdaten weiter",
+                err,
+            )
+
+    # Open-Meteo daily tail extension (optional, configurable)
+    if enable_open_meteo:
+        om_coordinator = GeoSphereOpenMeteoDailyCoordinator(hass, lat, lon)
+        try:
+            await om_coordinator.async_config_entry_first_refresh()
+            coordinators[DATA_OPEN_METEO_DAILY] = om_coordinator
+        except ConfigEntryNotReady as err:
+            _LOGGER.warning(
+                "Open-Meteo nicht erreichbar: %s – Integration läuft ohne Tagesverlängerung weiter",
                 err,
             )
 

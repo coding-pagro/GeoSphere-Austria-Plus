@@ -6,6 +6,7 @@ from custom_components.geosphere_austria_plus.const import (
     CONF_FORECAST_MODELS,
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
+    CONF_ENABLE_OPEN_METEO,
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_STATION_ID,
@@ -13,6 +14,7 @@ from custom_components.geosphere_austria_plus.const import (
     DATA_WARNINGS,
     DATA_AIR_QUALITY,
     DATA_CURRENT,
+    DATA_OPEN_METEO_DAILY,
     DOMAIN,
     DEFAULT_FORECAST_MODEL,
 )
@@ -302,6 +304,105 @@ class TestForecastModelsConditional:
         assert coordinators[DATA_FORECASTS] == {}
         assert DATA_WARNINGS not in coordinators
         assert DATA_AIR_QUALITY not in coordinators
+
+
+class TestOpenMeteoCoordinatorConditional:
+    async def test_open_meteo_enabled_coordinator_created(self):
+        entry = _make_entry(data={**_BASE_DATA, CONF_ENABLE_OPEN_METEO: True})
+        hass = _make_hass()
+        om_instance = _make_coordinator_mock()
+
+        with (
+            patch(f"{_PATCH_BASE}.GeoSphereForecastCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereWarningsCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereAirQualityCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereOpenMeteoDailyCoordinator", return_value=om_instance) as MockOM,
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+        MockOM.assert_called_once()
+        assert DATA_OPEN_METEO_DAILY in hass.data[DOMAIN][entry.entry_id]
+
+    async def test_open_meteo_disabled_coordinator_not_created(self):
+        entry = _make_entry(data={**_BASE_DATA, CONF_ENABLE_OPEN_METEO: False})
+        hass = _make_hass()
+
+        with (
+            patch(f"{_PATCH_BASE}.GeoSphereForecastCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereWarningsCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereAirQualityCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereOpenMeteoDailyCoordinator") as MockOM,
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+        MockOM.assert_not_called()
+        assert DATA_OPEN_METEO_DAILY not in hass.data[DOMAIN][entry.entry_id]
+
+    async def test_open_meteo_missing_key_defaults_to_enabled(self):
+        """Rückwärtskompatibilität: fehlender Schlüssel → Open-Meteo aktiv."""
+        entry = _make_entry(data=_BASE_DATA)  # kein CONF_ENABLE_OPEN_METEO
+        hass = _make_hass()
+        om_instance = _make_coordinator_mock()
+
+        with (
+            patch(f"{_PATCH_BASE}.GeoSphereForecastCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereWarningsCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereAirQualityCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereOpenMeteoDailyCoordinator", return_value=om_instance) as MockOM,
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+        MockOM.assert_called_once()
+
+    async def test_open_meteo_config_entry_not_ready_does_not_fail_setup(self):
+        """ConfigEntryNotReady from Open-Meteo must not abort integration setup."""
+        entry = _make_entry(data={**_BASE_DATA, CONF_ENABLE_OPEN_METEO: True})
+        hass = _make_hass()
+        om_instance = _make_coordinator_mock(raises=True)
+
+        with (
+            patch(f"{_PATCH_BASE}.GeoSphereForecastCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereWarningsCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereAirQualityCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereOpenMeteoDailyCoordinator", return_value=om_instance),
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            # Must complete without raising
+            await async_setup_entry(hass, entry)
+
+        assert DATA_OPEN_METEO_DAILY not in hass.data[DOMAIN][entry.entry_id]
+
+    async def test_open_meteo_disabled_via_options_overrides_data(self):
+        """Options haben Vorrang: data=True, options=False → deaktiviert."""
+        entry = _make_entry(
+            data={**_BASE_DATA, CONF_ENABLE_OPEN_METEO: True},
+            options={CONF_ENABLE_OPEN_METEO: False},
+        )
+        hass = _make_hass()
+
+        with (
+            patch(f"{_PATCH_BASE}.GeoSphereForecastCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereWarningsCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereAirQualityCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereOpenMeteoDailyCoordinator") as MockOM,
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+        MockOM.assert_not_called()
 
 
 class TestAsyncUnloadEntry:
