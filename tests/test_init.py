@@ -345,8 +345,8 @@ class TestOpenMeteoCoordinatorConditional:
         assert DATA_OPEN_METEO_DAILY not in hass.data[DOMAIN][entry.entry_id]
 
     async def test_open_meteo_missing_key_defaults_to_disabled(self):
-        """Fehlender Schlüssel → Open-Meteo deaktiviert (opt-in)."""
-        entry = _make_entry(data=_BASE_DATA)  # kein CONF_ENABLE_OPEN_METEO
+        """Missing key defaults to disabled (opt-in)."""
+        entry = _make_entry(data=_BASE_DATA)  # no CONF_ENABLE_OPEN_METEO
         hass = _make_hass()
 
         with (
@@ -383,7 +383,7 @@ class TestOpenMeteoCoordinatorConditional:
         assert DATA_OPEN_METEO_DAILY not in hass.data[DOMAIN][entry.entry_id]
 
     async def test_open_meteo_disabled_via_options_overrides_data(self):
-        """Options haben Vorrang: data=True, options=False → deaktiviert."""
+        """Options override data: data=True, options=False → disabled."""
         entry = _make_entry(
             data={**_BASE_DATA, CONF_ENABLE_OPEN_METEO: True},
             options={CONF_ENABLE_OPEN_METEO: False},
