@@ -94,10 +94,11 @@ async def run_tests():
             fail(f"get_current: {e}")
             return
 
+        lat = data.get("_lat", 47.5)
+        lon = data.get("_lon", 14.0)
+
         # --- Forecast per model ---
         for model in MODELS:
-            lat = data.get("_lat", 47.5)
-            lon = data.get("_lon", 14.0)
             print(f"\nModel {model}:")
             try:
                 forecasts = await api.get_forecast(lat, lon, model)
@@ -109,6 +110,23 @@ async def run_tests():
                     ok(f"{len(forecasts)} timesteps, first: {first.get('datetime')}  t2m={first.get('t2m')}  rain_acc={rain}")
             except Exception as e:
                 fail(f"get_forecast: {e}")
+
+        # --- Open-Meteo daily extension ---
+        print(f"\nOpen-Meteo daily (lat={lat:.3f}, lon={lon:.3f}):")
+        try:
+            from custom_components.geosphere_austria_plus.open_meteo_api import fetch_open_meteo_daily
+            om_days = await fetch_open_meteo_daily(session, lat, lon)
+            if not om_days:
+                fail("Returned 0 days")
+            else:
+                first = om_days[0]
+                last = om_days[-1]
+                ok(f"{len(om_days)} days  [{first['datetime'][:10]} … {last['datetime'][:10]}]")
+                ok(f"first day: condition={first.get('condition')}  t_max={first.get('native_temperature')}°C  t_min={first.get('native_templow')}°C")
+                om_only_keys = [k for k in ("uv_index", "solar_radiation", "precipitation_probability") if k in first]
+                ok(f"Open-Meteo-specific keys present: {om_only_keys}")
+        except Exception as e:
+            fail(f"fetch_open_meteo_daily: {e}")
 
     print()
 
