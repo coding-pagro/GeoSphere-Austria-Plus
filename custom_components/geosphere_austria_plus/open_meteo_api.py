@@ -41,7 +41,7 @@ async def fetch_open_meteo_daily(
         response.raise_for_status()
         data: dict[str, Any] = await response.json()
 
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     daily = data["daily"]
     times: list[str] = daily["time"]
     result: list[dict[str, Any]] = []
