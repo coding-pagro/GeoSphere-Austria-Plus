@@ -72,7 +72,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
             station_id: str | None = station_raw.strip() or None
             enable_warnings: bool = bool(user_input.get(CONF_ENABLE_WARNINGS, True))
             enable_air_quality: bool = bool(user_input.get(CONF_ENABLE_AIR_QUALITY, True))
-            enable_open_meteo: bool = bool(user_input.get(CONF_ENABLE_OPEN_METEO, True))
+            enable_open_meteo: bool = bool(user_input.get(CONF_ENABLE_OPEN_METEO, False))
 
             if name != self.config_entry.title:
                 self.hass.config_entries.async_update_entry(self.config_entry, title=name)
@@ -126,7 +126,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
         )
         current_enable_open_meteo: bool = self.config_entry.options.get(
             CONF_ENABLE_OPEN_METEO,
-            self.config_entry.data.get(CONF_ENABLE_OPEN_METEO, True),
+            self.config_entry.data.get(CONF_ENABLE_OPEN_METEO, False),
         )
 
         schema = self._build_schema(
@@ -145,7 +145,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
         models: list[str],
         enable_warnings: bool = True,
         enable_air_quality: bool = True,
-        enable_open_meteo: bool = True,
+        enable_open_meteo: bool = False,
     ) -> vol.Schema:
         station_field: Any
         if self._stations:
@@ -216,7 +216,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             models = [m for m in raw_models if m in FORECAST_MODELS]
             enable_warnings: bool = bool(user_input.get(CONF_ENABLE_WARNINGS, True))
             enable_air_quality: bool = bool(user_input.get(CONF_ENABLE_AIR_QUALITY, True))
-            enable_open_meteo: bool = bool(user_input.get(CONF_ENABLE_OPEN_METEO, True))
+            enable_open_meteo: bool = bool(user_input.get(CONF_ENABLE_OPEN_METEO, False))
 
             await self.async_set_unique_id(f"{round(lat, 3)}_{round(lon, 3)}")
             self._abort_if_unique_id_configured()
@@ -277,5 +277,5 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(CONF_ENABLE_WARNINGS, default=True): BooleanSelector(),
             vol.Optional(CONF_ENABLE_AIR_QUALITY, default=True): BooleanSelector(),
-            vol.Optional(CONF_ENABLE_OPEN_METEO, default=True): BooleanSelector(),
+            vol.Optional(CONF_ENABLE_OPEN_METEO, default=False): BooleanSelector(),
         })

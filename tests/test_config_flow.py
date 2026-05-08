@@ -218,13 +218,13 @@ class TestOptionsFlowInit:
         assert result["type"] == "create_entry"
         assert result["data"][CONF_ENABLE_OPEN_METEO] is False
 
-    async def test_enable_open_meteo_defaults_to_true_when_missing(self):
+    async def test_enable_open_meteo_defaults_to_false_when_missing(self):
         result = await _call(
             _FakeOptionsFlow(),
             user_input=_BASE_USER_INPUT,  # kein CONF_ENABLE_OPEN_METEO
         )
         assert result["type"] == "create_entry"
-        assert result["data"][CONF_ENABLE_OPEN_METEO] is True
+        assert result["data"][CONF_ENABLE_OPEN_METEO] is False
 
     async def test_zero_models_with_warnings_disabled(self):
         result = await _call(
@@ -446,8 +446,8 @@ class TestConfigFlowUserStep:
         assert result["type"] == "create_entry"
         assert result["data"][CONF_ENABLE_OPEN_METEO] is False
 
-    async def test_enable_open_meteo_defaults_to_true_when_missing(self):
+    async def test_enable_open_meteo_defaults_to_false_when_missing(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
         result = await _call_user(fake, user_input=_BASE_USER_INPUT)
         assert result["type"] == "create_entry"
-        assert result["data"][CONF_ENABLE_OPEN_METEO] is True
+        assert result["data"][CONF_ENABLE_OPEN_METEO] is False
