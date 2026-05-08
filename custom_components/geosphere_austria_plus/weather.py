@@ -4,8 +4,11 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any
+
+_TZ_VIENNA = ZoneInfo("Europe/Vienna")
 
 from homeassistant.components.weather import (
     Forecast,
@@ -739,16 +742,16 @@ class GeoSphereWeatherEntity(
 
         # --- With Open-Meteo: drop incomplete GeoSphere days, then merge ---
         # Today: always keep GeoSphere if any data exists.
-        # Future days: keep GeoSphere only when coverage reaches local 17:00.
-        # No modulo: 23 UTC + 1h offset = 24, which correctly satisfies >= 17.
+        # Future days: keep GeoSphere only when its last data point reaches 17:00 Vienna time.
         complete_gs: dict[str, Forecast] = {}
         for day_key, forecast in gs_days.items():
             if day_key == today_key:
                 complete_gs[day_key] = forecast
             else:
                 last_utc = day_last_utc_hour.get(day_key, 0)
-                local_hour = last_utc + self._lon / 15.0
-                if local_hour >= OPEN_METEO_DAY_COVERAGE_HOUR:
+                d = date.fromisoformat(day_key)
+                if (datetime(d.year, d.month, d.day, last_utc, tzinfo=timezone.utc).astimezone(_TZ_VIENNA)
+                        >= datetime(d.year, d.month, d.day, OPEN_METEO_DAY_COVERAGE_HOUR, tzinfo=_TZ_VIENNA)):
                     complete_gs[day_key] = forecast
 
         # Build Open-Meteo day lookup keyed by YYYY-MM-DD

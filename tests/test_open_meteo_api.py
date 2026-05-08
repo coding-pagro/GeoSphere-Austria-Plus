@@ -42,12 +42,6 @@ def _make_daily_response(days: list[str], **vars: list) -> dict:
     }
 
 
-_TODAY = date.today().isoformat()
-_TOMORROW = (date.today().replace(day=date.today().day + 1) if date.today().day < 28
-             else (date.today().replace(month=date.today().month + 1 if date.today().month < 12 else 1,
-                                        day=1, year=date.today().year + (1 if date.today().month == 12 else 0)))).isoformat()
-
-
 def _today_plus(offset: int) -> str:
     from datetime import timedelta
     return (date.today() + timedelta(days=offset)).isoformat()
