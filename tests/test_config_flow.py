@@ -221,7 +221,7 @@ class TestOptionsFlowInit:
     async def test_enable_open_meteo_defaults_to_false_when_missing(self):
         result = await _call(
             _FakeOptionsFlow(),
-            user_input=_BASE_USER_INPUT,  # kein CONF_ENABLE_OPEN_METEO
+            user_input=_BASE_USER_INPUT,  # no CONF_ENABLE_OPEN_METEO
         )
         assert result["type"] == "create_entry"
         assert result["data"][CONF_ENABLE_OPEN_METEO] is False

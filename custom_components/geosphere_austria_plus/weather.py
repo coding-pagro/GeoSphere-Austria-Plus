@@ -586,7 +586,7 @@ class GeoSphereWeatherEntity(
         return self._build_daily_forecasts()
 
     def _build_daily_forecasts(self) -> list[Forecast]:
-        """Stündliche GeoSphere-Daten auf Tage aggregieren; Tail via Open-Meteo verlängern."""
+        """Aggregate hourly GeoSphere data by day; extend tail via Open-Meteo."""
         now = datetime.now(timezone.utc)
         today_key = now.strftime("%Y-%m-%d")
 
