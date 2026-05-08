@@ -16,6 +16,7 @@ from custom_components.geosphere_austria_plus.const import (
     CONF_FORECAST_MODELS,
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
+    CONF_ENABLE_OPEN_METEO,
 )
 
 _DEFAULT_LAT = 48.21
@@ -200,6 +201,30 @@ class TestOptionsFlowInit:
         )
         assert result["type"] == "create_entry"
         assert result["data"][CONF_ENABLE_AIR_QUALITY] is True
+
+    async def test_enable_open_meteo_true_stored(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input={**_BASE_USER_INPUT, CONF_ENABLE_OPEN_METEO: True},
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_OPEN_METEO] is True
+
+    async def test_enable_open_meteo_false_stored(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input={**_BASE_USER_INPUT, CONF_ENABLE_OPEN_METEO: False},
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_OPEN_METEO] is False
+
+    async def test_enable_open_meteo_defaults_to_true_when_missing(self):
+        result = await _call(
+            _FakeOptionsFlow(),
+            user_input=_BASE_USER_INPUT,  # kein CONF_ENABLE_OPEN_METEO
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_OPEN_METEO] is True
 
     async def test_zero_models_with_warnings_disabled(self):
         result = await _call(
@@ -404,3 +429,25 @@ class TestConfigFlowUserStep:
         result = await _call_user(fake, user_input=_BASE_USER_INPUT)
         assert result["type"] == "create_entry"
         assert result["data"][CONF_ENABLE_AIR_QUALITY] is True
+
+    async def test_enable_open_meteo_true_stored(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(
+            fake, user_input={**_BASE_USER_INPUT, CONF_ENABLE_OPEN_METEO: True}
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_OPEN_METEO] is True
+
+    async def test_enable_open_meteo_false_stored(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(
+            fake, user_input={**_BASE_USER_INPUT, CONF_ENABLE_OPEN_METEO: False}
+        )
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_OPEN_METEO] is False
+
+    async def test_enable_open_meteo_defaults_to_true_when_missing(self):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(fake, user_input=_BASE_USER_INPUT)
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_ENABLE_OPEN_METEO] is True

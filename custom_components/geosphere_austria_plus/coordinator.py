@@ -5,6 +5,7 @@ import logging
 from datetime import timedelta
 from typing import Any
 
+import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -17,7 +18,9 @@ from .const import (
     WARNINGS_UPDATE_INTERVAL,
     AIR_QUALITY_UPDATE_INTERVAL,
     DEFAULT_FORECAST_MODEL,
+    OPEN_METEO_UPDATE_INTERVAL,
 )
+from .open_meteo_api import fetch_open_meteo_daily
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -186,3 +189,31 @@ class GeoSphereAirQualityCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str
             if cached is not None:
                 return cached
             raise UpdateFailed(f"Schadstoff-API Fehler: {err}") from err
+
+
+class GeoSphereOpenMeteoDailyCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[str, Any]]]):
+    """Coordinator for the Open-Meteo daily forecast tail extension."""
+
+    def __init__(self, hass: HomeAssistant, lat: float, lon: float) -> None:
+        self.lat = lat
+        self.lon = lon
+        self._session = async_get_clientsession(hass)
+        self._last_good_data: list[dict[str, Any]] | None = None
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_open_meteo_{lat}_{lon}",
+            update_interval=timedelta(minutes=OPEN_METEO_UPDATE_INTERVAL),
+        )
+        self._retry_init()
+
+    async def _async_update_data(self) -> list[dict[str, Any]]:
+        try:
+            return self._retry_on_success(
+                await fetch_open_meteo_daily(self._session, self.lat, self.lon)
+            )
+        except (aiohttp.ClientError, ValueError, KeyError) as err:
+            cached = self._retry_on_failure("Open-Meteo", err)
+            if cached is not None:
+                return cached
+            raise UpdateFailed(f"Open-Meteo Fehler: {err}") from err

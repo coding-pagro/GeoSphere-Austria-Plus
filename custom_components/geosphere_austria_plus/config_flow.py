@@ -29,6 +29,7 @@ from .const import (
     CONF_LONGITUDE,
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
+    CONF_ENABLE_OPEN_METEO,
     FORECAST_MODELS,
     DEFAULT_FORECAST_MODEL,
     FORECAST_MODEL_LABELS,
@@ -71,6 +72,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
             station_id: str | None = station_raw.strip() or None
             enable_warnings: bool = bool(user_input.get(CONF_ENABLE_WARNINGS, True))
             enable_air_quality: bool = bool(user_input.get(CONF_ENABLE_AIR_QUALITY, True))
+            enable_open_meteo: bool = bool(user_input.get(CONF_ENABLE_OPEN_METEO, True))
 
             if name != self.config_entry.title:
                 self.hass.config_entries.async_update_entry(self.config_entry, title=name)
@@ -83,6 +85,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_FORECAST_MODELS: models,
                 CONF_ENABLE_WARNINGS: enable_warnings,
                 CONF_ENABLE_AIR_QUALITY: enable_air_quality,
+                CONF_ENABLE_OPEN_METEO: enable_open_meteo,
             })
 
         # Aktuelle Werte — Options haben Vorrang vor Data
@@ -121,10 +124,15 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_ENABLE_AIR_QUALITY,
             self.config_entry.data.get(CONF_ENABLE_AIR_QUALITY, True),
         )
+        current_enable_open_meteo: bool = self.config_entry.options.get(
+            CONF_ENABLE_OPEN_METEO,
+            self.config_entry.data.get(CONF_ENABLE_OPEN_METEO, True),
+        )
 
         schema = self._build_schema(
             current_name, current_lat, current_lon, current_station,
             current_models, current_enable_warnings, current_enable_air_quality,
+            current_enable_open_meteo,
         )
         return self.async_show_form(step_id="init", data_schema=schema)
 
@@ -137,6 +145,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
         models: list[str],
         enable_warnings: bool = True,
         enable_air_quality: bool = True,
+        enable_open_meteo: bool = True,
     ) -> vol.Schema:
         station_field: Any
         if self._stations:
@@ -172,6 +181,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
             ),
             vol.Optional(CONF_ENABLE_WARNINGS, default=enable_warnings): BooleanSelector(),
             vol.Optional(CONF_ENABLE_AIR_QUALITY, default=enable_air_quality): BooleanSelector(),
+            vol.Optional(CONF_ENABLE_OPEN_METEO, default=enable_open_meteo): BooleanSelector(),
         })
 
 
@@ -206,6 +216,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             models = [m for m in raw_models if m in FORECAST_MODELS]
             enable_warnings: bool = bool(user_input.get(CONF_ENABLE_WARNINGS, True))
             enable_air_quality: bool = bool(user_input.get(CONF_ENABLE_AIR_QUALITY, True))
+            enable_open_meteo: bool = bool(user_input.get(CONF_ENABLE_OPEN_METEO, True))
 
             await self.async_set_unique_id(f"{round(lat, 3)}_{round(lon, 3)}")
             self._abort_if_unique_id_configured()
@@ -220,6 +231,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_FORECAST_MODELS: models,
                     CONF_ENABLE_WARNINGS: enable_warnings,
                     CONF_ENABLE_AIR_QUALITY: enable_air_quality,
+                    CONF_ENABLE_OPEN_METEO: enable_open_meteo,
                 },
             )
 
@@ -265,4 +277,5 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(CONF_ENABLE_WARNINGS, default=True): BooleanSelector(),
             vol.Optional(CONF_ENABLE_AIR_QUALITY, default=True): BooleanSelector(),
+            vol.Optional(CONF_ENABLE_OPEN_METEO, default=True): BooleanSelector(),
         })
