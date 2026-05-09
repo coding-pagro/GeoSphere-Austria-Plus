@@ -159,8 +159,12 @@ WMO_TO_HA_CONDITION_MAP: dict[int, str] = {
     82: "pouring",
     85: "snowy",
     86: "snowy",
-    95: "lightning",
-    96: "lightning",
-    99: "lightning",
+    # WMO 95/96/99 all imply precipitation by definition (rain, snow, or hail).
+    # Using "lightning-rainy" matches GeoSphere sy codes 26–32 and avoids an
+    # icon jump at the GeoSphere→Open-Meteo boundary. Intentional deviation
+    # from the official HA open_meteo integration which uses "lightning".
+    95: "lightning-rainy",
+    96: "lightning-rainy",
+    99: "lightning-rainy",
 }
 

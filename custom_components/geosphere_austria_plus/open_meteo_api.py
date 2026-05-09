@@ -85,7 +85,9 @@ async def fetch_open_meteo_daily(
         _put(entry, "native_dew_point", _v("dew_point_2m_mean"))
         _put(entry, "uv_index", _v("uv_index_max"))
         _put(entry, "cape", _v("cape_max"))
-        _put(entry, "solar_radiation", _v("shortwave_radiation_sum"))
+        # shortwave_radiation_sum (MJ/m², daily sum) is intentionally not mapped:
+        # GeoSphere daily forecasts expose no solar field either, so omitting it
+        # keeps both sources consistent rather than surfacing an incompatible value.
         _put(entry, "sunshine_duration", _v("sunshine_duration"))
         _put(entry, "sunrise", _v("sunrise"))
         _put(entry, "sunset", _v("sunset"))

@@ -1830,8 +1830,8 @@ class TestBuildDailyForecastsWithOpenMeteo:
         # days 2+ should come from OM and be "cloudy"
         day2 = (date.today() + timedelta(days=2)).isoformat()
         day2_entries = [f for f in forecasts if f["datetime"].startswith(day2)]
-        if day2_entries:
-            assert day2_entries[0]["condition"] == "cloudy"
+        assert len(day2_entries) == 1
+        assert day2_entries[0]["condition"] == "cloudy"
 
 
 # ---------------------------------------------------------------------------

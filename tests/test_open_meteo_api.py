@@ -147,7 +147,6 @@ class TestJsonParsing:
             dew_point_2m_mean=[8.0],
             uv_index_max=[4.0],
             cape_max=[200.0],
-            shortwave_radiation_sum=[15.0],
             sunshine_duration=[28800.0],
             sunrise=["2025-01-01T07:45"],
             sunset=["2025-01-01T16:30"],
@@ -172,7 +171,7 @@ class TestJsonParsing:
         assert entry["native_dew_point"] == 8.0
         assert entry["uv_index"] == 4.0
         assert entry["cape"] == 200.0
-        assert entry["solar_radiation"] == 15.0
+        assert "solar_radiation" not in entry
         assert entry["sunshine_duration"] == 28800.0
         assert entry["sunrise"] == "2025-01-01T07:45"
         assert entry["sunset"] == "2025-01-01T16:30"
@@ -238,9 +237,9 @@ class TestWmoMapping:
         (82, "pouring"),
         (85, "snowy"),
         (86, "snowy"),
-        (95, "lightning"),
-        (96, "lightning"),
-        (99, "lightning"),
+        (95, "lightning-rainy"),
+        (96, "lightning-rainy"),
+        (99, "lightning-rainy"),
     ])
     async def test_wmo_code_maps_correctly(self, code: int, expected: str):
         days = [_today_plus(0)]

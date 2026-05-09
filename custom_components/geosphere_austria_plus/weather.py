@@ -8,8 +8,6 @@ from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any
 
-_TZ_VIENNA = ZoneInfo("Europe/Vienna")
-
 from homeassistant.components.weather import (
     Forecast,
     WeatherEntity,
@@ -51,6 +49,7 @@ from .coordinator import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_TZ_VIENNA = ZoneInfo("Europe/Vienna")
 
 # Schwellenwerte für Conditions aus Stationsdaten
 _RAIN_THRESHOLD_MM = 0.2      # RR > 0.2 mm/10min → Regen
