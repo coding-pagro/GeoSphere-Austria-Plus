@@ -4,7 +4,8 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from homeassistant.components.weather import (
@@ -27,6 +28,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTRIBUTION,
+    OPEN_METEO_ATTRIBUTION,
     DOMAIN,
     CONF_NAME,
     CONF_FORECAST_MODEL,
@@ -35,12 +37,19 @@ from .const import (
     CONF_LONGITUDE,
     DATA_CURRENT,
     DATA_FORECASTS,
+    DATA_OPEN_METEO_DAILY,
     DEFAULT_FORECAST_MODEL,
     FORECAST_MODEL_LABELS,
+    OPEN_METEO_DAY_COVERAGE_HOUR,
 )
-from .coordinator import GeoSphereCurrentCoordinator, GeoSphereForecastCoordinator
+from .coordinator import (
+    GeoSphereCurrentCoordinator,
+    GeoSphereForecastCoordinator,
+    GeoSphereOpenMeteoDailyCoordinator,
+)
 
 _LOGGER = logging.getLogger(__name__)
+_TZ_VIENNA = ZoneInfo("Europe/Vienna")
 
 # Schwellenwerte für Conditions aus Stationsdaten
 _RAIN_THRESHOLD_MM = 0.2      # RR > 0.2 mm/10min → Regen
@@ -189,6 +198,7 @@ async def async_setup_entry(
         models = [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
 
     current_coordinator: GeoSphereCurrentCoordinator | None = coordinators.get(DATA_CURRENT)
+    open_meteo_coordinator: GeoSphereOpenMeteoDailyCoordinator | None = coordinators.get(DATA_OPEN_METEO_DAILY)
 
     all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] = coordinators[DATA_FORECASTS]
 
@@ -201,6 +211,7 @@ async def async_setup_entry(
             location_name=location_name,
             lon=lon,
             all_forecast_coordinators=all_forecast_coordinators,
+            open_meteo_coordinator=open_meteo_coordinator,
         )
         for model in models
     ]
@@ -224,7 +235,6 @@ class GeoSphereWeatherEntity(
     """
 
     _attr_has_entity_name = True
-    _attr_attribution = ATTRIBUTION
     _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_native_pressure_unit = UnitOfPressure.HPA
     _attr_native_wind_speed_unit = UnitOfSpeed.METERS_PER_SECOND
@@ -239,9 +249,11 @@ class GeoSphereWeatherEntity(
         location_name: str,
         lon: float = 14.0,
         all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] | None = None,
+        open_meteo_coordinator: GeoSphereOpenMeteoDailyCoordinator | None = None,
     ) -> None:
         super().__init__(forecast_coordinator)
         self._current_coordinator = current_coordinator
+        self._open_meteo_coordinator = open_meteo_coordinator
         self._model = model
         self._lon = lon
         # All active forecast coordinators keyed by model name.
@@ -268,6 +280,12 @@ class GeoSphereWeatherEntity(
         if "nowcast" in self._model:
             return WeatherEntityFeature.FORECAST_HOURLY
         return WeatherEntityFeature.FORECAST_HOURLY | WeatherEntityFeature.FORECAST_DAILY
+
+    @property
+    def attribution(self) -> str | None:
+        if self._open_meteo_coordinator is not None and self._open_meteo_coordinator.data:
+            return f"{ATTRIBUTION}\n{OPEN_METEO_ATTRIBUTION}"
+        return ATTRIBUTION
 
     # ------------------------------------------------------------------
     # Koordinator-Daten
@@ -567,9 +585,13 @@ class GeoSphereWeatherEntity(
         return self._build_daily_forecasts()
 
     def _build_daily_forecasts(self) -> list[Forecast]:
-        """Stündliche Daten auf Tage aggregieren."""
-        days: dict[str, list[dict]] = defaultdict(list)
+        """Aggregate hourly GeoSphere data by day; extend tail via Open-Meteo."""
         now = datetime.now(timezone.utc)
+        today_key = now.strftime("%Y-%m-%d")
+
+        # --- GeoSphere: group entries by day, track last UTC hour per future day ---
+        days: dict[str, list[dict]] = defaultdict(list)
+        day_last_utc_hour: dict[str, int] = {}
 
         for entry in self._forecast_raw:
             ts_str = entry.get("datetime")
@@ -583,9 +605,14 @@ class GeoSphereWeatherEntity(
                 continue
             day_key = dt.strftime("%Y-%m-%d")
             days[day_key].append(entry)
+            if day_key != today_key:
+                prev = day_last_utc_hour.get(day_key, -1)
+                if dt.hour > prev:
+                    day_last_utc_hour[day_key] = dt.hour
 
-        forecasts: list[Forecast] = []
-        for day_key in sorted(days.keys())[:7]:
+        # --- GeoSphere: per-day aggregation ---
+        gs_days: dict[str, Forecast] = {}
+        for day_key in sorted(days.keys()):
             entries = days[day_key]
             temps = [e["t2m"] for e in entries if e.get("t2m") is not None]
             rain_list = [e.get("rain_acc") or 0.0 for e in entries]
@@ -706,9 +733,46 @@ class GeoSphereWeatherEntity(
                 daily_entry["snow_altitude"] = round(snowlmt_min)  # type: ignore[typeddict-unknown-key]
             if cape_max is not None:
                 daily_entry["cape"] = round(cape_max)  # type: ignore[typeddict-unknown-key]
-            forecasts.append(daily_entry)
+            gs_days[day_key] = daily_entry
 
-        return forecasts
+        # --- Without Open-Meteo: original behaviour (max 7 GeoSphere days) ---
+        if self._open_meteo_coordinator is None:
+            return [gs_days[k] for k in sorted(gs_days.keys())[:7]]
+
+        # --- With Open-Meteo: drop incomplete GeoSphere days, then merge ---
+        # Today: always keep GeoSphere if any data exists.
+        # Future days: keep GeoSphere only when its last data point reaches 17:00 Vienna time.
+        complete_gs: dict[str, Forecast] = {}
+        for day_key, forecast in gs_days.items():
+            if day_key == today_key:
+                complete_gs[day_key] = forecast
+            else:
+                last_utc = day_last_utc_hour.get(day_key, 0)
+                d = date.fromisoformat(day_key)
+                if (datetime(d.year, d.month, d.day, last_utc, tzinfo=timezone.utc).astimezone(_TZ_VIENNA)
+                        >= datetime(d.year, d.month, d.day, OPEN_METEO_DAY_COVERAGE_HOUR, tzinfo=_TZ_VIENNA)):
+                    complete_gs[day_key] = forecast
+
+        # Build Open-Meteo day lookup keyed by YYYY-MM-DD
+        om_days: dict[str, dict] = {}
+        for om_entry in (self._open_meteo_coordinator.data or []):
+            dt_str = om_entry.get("datetime", "")
+            try:
+                om_key = datetime.fromisoformat(dt_str).strftime("%Y-%m-%d")
+                om_days[om_key] = om_entry
+            except (ValueError, AttributeError):
+                pass
+
+        # Merge: walk 14 days from today, prefer GeoSphere, fall back to Open-Meteo
+        today_date = now.date()
+        result: list[Forecast] = []
+        for offset in range(14):
+            dk = (today_date + timedelta(days=offset)).strftime("%Y-%m-%d")
+            day_entry = complete_gs.get(dk) or om_days.get(dk)
+            if day_entry is not None:
+                result.append(day_entry)  # type: ignore[arg-type]
+
+        return result
 
     # ------------------------------------------------------------------
     # Nowcast tcc resolution
@@ -810,4 +874,8 @@ class GeoSphereWeatherEntity(
         if self._current_coordinator is not None:
             self.async_on_remove(
                 self._current_coordinator.async_add_listener(self.async_write_ha_state)
+            )
+        if self._open_meteo_coordinator is not None:
+            self.async_on_remove(
+                self._open_meteo_coordinator.async_add_listener(self.async_write_ha_state)
             )

@@ -143,7 +143,11 @@ Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32
 
 ---
 
-## Vorhersage-Attribute
+## Vorhersage
+
+Die GeoSphere-Modelle **NWP** und **Ensemble** liefern stündliche Daten für rund 60 Stunden; daraus entstehen 2–3 Tagesvorhersagen. Optional kann in den Einstellungen **Open-Meteo** aktiviert werden – das verlängert die tägliche Vorhersage auf bis zu 14 Tage. Die ersten Tage stammen dabei weiterhin von GeoSphere; Open-Meteo füllt ausschließlich den Bereich, den GeoSphere nicht mehr abdeckt.
+
+### Attribute
 
 Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Luftfeuchtigkeit) liefert die Integration je Forecast-Slot folgende Zusatzattribute, die in Dashboards (z. B. via `state_attr()`) verwendet werden können:
 

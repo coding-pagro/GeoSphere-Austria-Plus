@@ -34,7 +34,8 @@
           "station_id": "TAWES Station (optional)",
           "forecast_models": "Forecast models (select 0–3)",
           "enable_warnings": "Enable weather warnings",
-          "enable_air_quality": "Enable air quality index"
+          "enable_air_quality": "Enable air quality index",
+          "enable_open_meteo": "Extend daily forecast via Open-Meteo (up to 14 days)"
         }
       }
     }
@@ -51,7 +52,8 @@
           "station_id": "TAWES Station (optional)",
           "forecast_models": "Forecast models (select 0–3)",
           "enable_warnings": "Enable weather warnings",
-          "enable_air_quality": "Enable air quality index"
+          "enable_air_quality": "Enable air quality index",
+          "enable_open_meteo": "Extend daily forecast via Open-Meteo (up to 14 days)"
         }
       }
     },

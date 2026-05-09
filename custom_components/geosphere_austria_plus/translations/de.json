@@ -34,7 +34,8 @@
           "station_id": "TAWES-Messstation (optional)",
           "forecast_models": "Vorhersagemodelle (0–3 wählen)",
           "enable_warnings": "Unwetterwarnungen aktivieren",
-          "enable_air_quality": "Luftqualitätsindex aktivieren"
+          "enable_air_quality": "Luftqualitätsindex aktivieren",
+          "enable_open_meteo": "Tagesvorhersage via Open-Meteo verlängern (bis 14 Tage)"
         }
       }
     }
@@ -51,7 +52,8 @@
           "station_id": "TAWES-Messstation (optional)",
           "forecast_models": "Vorhersagemodelle (0–3 wählen)",
           "enable_warnings": "Unwetterwarnungen aktivieren",
-          "enable_air_quality": "Luftqualitätsindex aktivieren"
+          "enable_air_quality": "Luftqualitätsindex aktivieren",
+          "enable_open_meteo": "Tagesvorhersage via Open-Meteo verlängern (bis 14 Tage)"
         }
       }
     },

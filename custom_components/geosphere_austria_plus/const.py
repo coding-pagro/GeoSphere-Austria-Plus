@@ -113,3 +113,58 @@ ENSEMBLE_PARAM_MAP = {
     "cape_p50":    "cape",
 }
 
+# Open-Meteo (daily forecast tail extension)
+CONF_ENABLE_OPEN_METEO = "enable_open_meteo"
+DATA_OPEN_METEO_DAILY = "open_meteo_daily"
+OPEN_METEO_API_BASE = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_UPDATE_INTERVAL = 60   # minutes
+OPEN_METEO_FORECAST_DAYS = 16
+OPEN_METEO_MODEL = "geosphere_seamless"
+OPEN_METEO_DAY_COVERAGE_HOUR = 17  # local hour; GeoSphere days reaching this threshold are considered complete
+OPEN_METEO_ATTRIBUTION = "Daily forecast extension by Open-Meteo (CC-BY 4.0)"
+
+OPEN_METEO_DAILY_PARAMS = (
+    "weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,"
+    "precipitation_sum,precipitation_probability_max,wind_speed_10m_max,"
+    "wind_gusts_10m_max,wind_direction_10m_dominant,relative_humidity_2m_mean,"
+    "cloud_cover_mean,pressure_msl_mean,dew_point_2m_mean,uv_index_max,"
+    "cape_max,shortwave_radiation_sum,sunshine_duration,sunrise,sunset,"
+    "precipitation_hours"
+)
+
+# WMO code → HA weather condition (copied from homeassistant/components/open_meteo/const.py)
+WMO_TO_HA_CONDITION_MAP: dict[int, str] = {
+    0: "sunny",
+    1: "sunny",
+    2: "partlycloudy",
+    3: "cloudy",
+    45: "fog",
+    48: "fog",
+    51: "rainy",
+    53: "rainy",
+    55: "pouring",
+    56: "rainy",
+    57: "rainy",
+    61: "rainy",
+    63: "rainy",
+    65: "pouring",
+    66: "rainy",
+    67: "pouring",
+    71: "snowy",
+    73: "snowy",
+    75: "snowy",
+    77: "snowy",
+    80: "rainy",
+    81: "rainy",
+    82: "pouring",
+    85: "snowy",
+    86: "snowy",
+    # WMO 95/96/99 all imply precipitation by definition (rain, snow, or hail).
+    # Using "lightning-rainy" matches GeoSphere sy codes 26–32 and avoids an
+    # icon jump at the GeoSphere→Open-Meteo boundary. Intentional deviation
+    # from the official HA open_meteo integration which uses "lightning".
+    95: "lightning-rainy",
+    96: "lightning-rainy",
+    99: "lightning-rainy",
+}
+

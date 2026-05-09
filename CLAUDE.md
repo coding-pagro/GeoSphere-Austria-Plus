@@ -91,7 +91,7 @@ Beyond standard HA Forecast fields (`native_temperature`, `native_precipitation`
 
 ## Testing
 
-414+ unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Key test files:
+514+ unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Key test files:
 
 - `test_api.py` — HTTP client, parameter URL building, GeoJSON parsing, ensemble normalisation, deaccumulation.
 - `test_coordinator.py` — Fibonacci-backoff retry, last-known-good caching.
