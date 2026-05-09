@@ -770,12 +770,14 @@ class TestBuildDailyForecasts:
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].condition == "lightning-rainy"
 
-    def test_daytime_sy_overrides_low_tcc_average(self, entity, current_coord, forecast_coord):
-        """Bug fix: when night tcc=0 drags down the 24h average, daytime sy still wins.
+    def test_cloud_only_condition_uses_daytime_tcc_not_24h_average(
+        self, entity, current_coord, forecast_coord
+    ):
+        """Cloud-only days use daytime tcc average, not the misleading 24h average.
 
-        Concrete failing scenario: daytime hours all have sy=4 (cloudy) but the
-        24h tcc average falls below 0.5 due to clear-night hours → old code returns
-        'sunny', new code returns 'cloudy'.
+        Scenario: daytime hours all have tcc=0.75 (partlycloudy), night hours tcc=0.0.
+        24h tcc average ≈ 0.47 → would give "sunny" (wrong).
+        Daytime tcc average = 0.75 → gives "partlycloudy" (correct).
         """
         current_coord.data = {}
         base_dt = (
@@ -799,9 +801,78 @@ class TestBuildDailyForecasts:
                 "sy": 4 if is_day_approx else 1,
             })
         forecast_coord.data = entries
-        # 24h tcc average ≈ 0.47 → old code: sunny (wrong); new code: cloudy (correct)
         forecasts = entity._build_daily_forecasts()
-        assert forecasts[0].condition == "cloudy"
+        assert forecasts[0].condition == "partlycloudy"
+
+    def test_cloud_only_sy_uses_tcc_average_not_max_sy(
+        self, entity, current_coord, forecast_coord
+    ):
+        """For cloud-only days, averaging tcc prevents a few overcast hours from
+        making an otherwise sunny day report as cloudy.
+
+        Scenario: 10 sunny hours (sy=1, tcc=0.1) + 5 overcast hours (sy=5, tcc=0.9).
+        max(sy)=5 → old code: "cloudy".
+        daytime tcc average = (10*0.1 + 5*0.9) / 15 ≈ 0.367 → new code: "sunny".
+        """
+        current_coord.data = {}
+        base_dt = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        entries = []
+        # Build 15 daytime-ish entries: hours 5–19 UTC (Vienna daytime)
+        for i in range(24):
+            dt = base_dt + timedelta(hours=i)
+            is_day_approx = 5 <= i < 20
+            sunny = i < 15  # first 10 daytime hours sunny, last 5 overcast
+            entries.append({
+                "datetime": dt.isoformat(),
+                "t2m": 15.0,
+                "rain_acc": 0.0,
+                "snow_acc": 0.0,
+                "rh2m": 60.0,
+                "u10m": 2.0,
+                "v10m": 2.0,
+                "tcc": 0.1 if (is_day_approx and sunny) else (0.9 if is_day_approx else 0.0),
+                "sy": 1 if (is_day_approx and sunny) else (5 if is_day_approx else 1),
+            })
+        forecast_coord.data = entries
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "sunny"
+
+    def test_precipitation_sy_code_uses_max_not_tcc_average(
+        self, entity, current_coord, forecast_coord
+    ):
+        """Any daytime sy code >= 8 (precipitation/storm) keeps the max() path.
+
+        Scenario: 14 clear hours (sy=1, tcc=0.1) + 1 rainy-shower hour (sy=9).
+        daytime tcc average would give "sunny", but sy=9 >= 8 → "rainy".
+        """
+        current_coord.data = {}
+        base_dt = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        entries = []
+        for i in range(24):
+            dt = base_dt + timedelta(hours=i)
+            is_day_approx = 5 <= i < 20
+            entries.append({
+                "datetime": dt.isoformat(),
+                "t2m": 15.0,
+                "rain_acc": 0.0,
+                "snow_acc": 0.0,
+                "rh2m": 60.0,
+                "u10m": 2.0,
+                "v10m": 2.0,
+                "tcc": 0.1,
+                "sy": 1 if is_day_approx else None,
+            })
+        # One midday hour gets a rain-shower code
+        entries[12]["sy"] = 9
+        forecast_coord.data = entries
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].condition == "rainy"
 
     def test_thunderstorm_sy_as_float_is_handled(self, entity, current_coord, forecast_coord):
         """Robustness: sy delivered as float (e.g. 26.0) still triggers lightning-rainy."""
