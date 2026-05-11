@@ -39,7 +39,7 @@
           "open_meteo_forecast_days": "Open-Meteo-Vorhersagetage"
         },
         "data_description": {
-          "open_meteo_forecast_days": "Anzahl der Tage (3–14), die Open-Meteo ergänzt, wenn der Schalter oben aktiv ist."
+          "open_meteo_forecast_days": "Anzahl der Tage (3–14), auf die Open-Meteo ergänzt, wenn der Schalter oben aktiv ist."
         }
       }
     }
@@ -61,7 +61,7 @@
           "open_meteo_forecast_days": "Open-Meteo-Vorhersagetage"
         },
         "data_description": {
-          "open_meteo_forecast_days": "Anzahl der Tage (3–14), die Open-Meteo ergänzt, wenn der Schalter oben aktiv ist."
+          "open_meteo_forecast_days": "Anzahl der Tage (3–14), auf die Open-Meteo ergänzt, wenn der Schalter oben aktiv ist."
         }
       }
     },
