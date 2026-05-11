@@ -35,12 +35,14 @@ from .const import (
     CONF_FORECAST_MODELS,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_OPEN_METEO_FORECAST_DAYS,
     DATA_CURRENT,
     DATA_FORECASTS,
     DATA_OPEN_METEO_DAILY,
     DEFAULT_FORECAST_MODEL,
     FORECAST_MODEL_LABELS,
     OPEN_METEO_DAY_COVERAGE_HOUR,
+    OPEN_METEO_FORECAST_DAYS_DEFAULT,
 )
 from .coordinator import (
     GeoSphereCurrentCoordinator,
@@ -202,6 +204,13 @@ async def async_setup_entry(
 
     all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] = coordinators[DATA_FORECASTS]
 
+    open_meteo_forecast_days: int = int(
+        entry.options.get(
+            CONF_OPEN_METEO_FORECAST_DAYS,
+            entry.data.get(CONF_OPEN_METEO_FORECAST_DAYS, OPEN_METEO_FORECAST_DAYS_DEFAULT),
+        )
+    )
+
     entities = [
         GeoSphereWeatherEntity(
             current_coordinator=current_coordinator,
@@ -212,6 +221,7 @@ async def async_setup_entry(
             lon=lon,
             all_forecast_coordinators=all_forecast_coordinators,
             open_meteo_coordinator=open_meteo_coordinator,
+            open_meteo_forecast_days=open_meteo_forecast_days,
         )
         for model in models
     ]
@@ -250,10 +260,12 @@ class GeoSphereWeatherEntity(
         lon: float = 14.0,
         all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] | None = None,
         open_meteo_coordinator: GeoSphereOpenMeteoDailyCoordinator | None = None,
+        open_meteo_forecast_days: int = OPEN_METEO_FORECAST_DAYS_DEFAULT,
     ) -> None:
         super().__init__(forecast_coordinator)
         self._current_coordinator = current_coordinator
         self._open_meteo_coordinator = open_meteo_coordinator
+        self._open_meteo_forecast_days = open_meteo_forecast_days
         self._model = model
         self._lon = lon
         # All active forecast coordinators keyed by model name.
@@ -763,10 +775,10 @@ class GeoSphereWeatherEntity(
             except (ValueError, AttributeError):
                 pass
 
-        # Merge: walk 14 days from today, prefer GeoSphere, fall back to Open-Meteo
+        # Merge: walk configured number of days from today, prefer GeoSphere, fall back to Open-Meteo
         today_date = now.date()
         result: list[Forecast] = []
-        for offset in range(14):
+        for offset in range(self._open_meteo_forecast_days):
             dk = (today_date + timedelta(days=offset)).strftime("%Y-%m-%d")
             day_entry = complete_gs.get(dk) or om_days.get(dk)
             if day_entry is not None:

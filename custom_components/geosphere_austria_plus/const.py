@@ -115,10 +115,14 @@ ENSEMBLE_PARAM_MAP = {
 
 # Open-Meteo (daily forecast tail extension)
 CONF_ENABLE_OPEN_METEO = "enable_open_meteo"
+CONF_OPEN_METEO_FORECAST_DAYS = "open_meteo_forecast_days"
 DATA_OPEN_METEO_DAILY = "open_meteo_daily"
 OPEN_METEO_API_BASE = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_UPDATE_INTERVAL = 60   # minutes
-OPEN_METEO_FORECAST_DAYS = 16
+OPEN_METEO_FORECAST_DAYS = 16     # API buffer — always request 16 days regardless of display setting
+OPEN_METEO_FORECAST_DAYS_MIN = 3
+OPEN_METEO_FORECAST_DAYS_MAX = 14
+OPEN_METEO_FORECAST_DAYS_DEFAULT = 7
 OPEN_METEO_MODEL = "geosphere_seamless"
 OPEN_METEO_DAY_COVERAGE_HOUR = 17  # local hour; GeoSphere days reaching this threshold are considered complete
 OPEN_METEO_ATTRIBUTION = "Daily forecast extension by Open-Meteo (CC-BY 4.0)"

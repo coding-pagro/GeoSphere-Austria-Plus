@@ -1773,10 +1773,19 @@ class TestBuildDailyForecastsWithOpenMeteo:
         assert all(f["condition"] == "sunny" for f in forecasts)
 
     def test_capped_at_14_days(self, forecast_coord):
-        """Result never exceeds 14 entries regardless of OM data size."""
+        """Result never exceeds 14 entries even when configured at maximum (14)."""
         forecast_coord.data = []
         om = _om_coordinator([_om_day(i) for i in range(20)])
-        entity = self._entity_with_om(forecast_coord, om)
+        entity = GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="test_entry",
+            model="nwp-v1-1h-2500m",
+            location_name="Test",
+            lon=16.37,
+            open_meteo_coordinator=om,
+            open_meteo_forecast_days=14,
+        )
 
         forecasts = entity._build_daily_forecasts()
 
@@ -1832,6 +1841,44 @@ class TestBuildDailyForecastsWithOpenMeteo:
         day2_entries = [f for f in forecasts if f["datetime"].startswith(day2)]
         assert len(day2_entries) == 1
         assert day2_entries[0]["condition"] == "cloudy"
+
+    def test_om_forecast_days_limit(self, forecast_coord):
+        """open_meteo_forecast_days=5 restricts result to at most 5 entries."""
+        forecast_coord.data = []
+        om = _om_coordinator([_om_day(i) for i in range(10)])
+        entity = GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="test_entry",
+            model="nwp-v1-1h-2500m",
+            location_name="Test",
+            lon=16.37,
+            open_meteo_coordinator=om,
+            open_meteo_forecast_days=5,
+        )
+
+        forecasts = entity._build_daily_forecasts()
+
+        assert len(forecasts) == 5
+
+    def test_om_forecast_days_minimum(self, forecast_coord):
+        """open_meteo_forecast_days=3 restricts result to at most 3 entries."""
+        forecast_coord.data = []
+        om = _om_coordinator([_om_day(i) for i in range(10)])
+        entity = GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="test_entry",
+            model="nwp-v1-1h-2500m",
+            location_name="Test",
+            lon=16.37,
+            open_meteo_coordinator=om,
+            open_meteo_forecast_days=3,
+        )
+
+        forecasts = entity._build_daily_forecasts()
+
+        assert len(forecasts) == 3
 
 
 # ---------------------------------------------------------------------------

@@ -35,7 +35,11 @@
           "forecast_models": "Forecast models (select 0–3)",
           "enable_warnings": "Enable weather warnings",
           "enable_air_quality": "Enable air quality index",
-          "enable_open_meteo": "Extend daily forecast via Open-Meteo (up to 14 days)"
+          "enable_open_meteo": "Extend daily forecast via Open-Meteo",
+          "open_meteo_forecast_days": "Days of Open-Meteo forecast extension"
+        },
+        "data_description": {
+          "open_meteo_forecast_days": "Number of days (3–14) filled by Open-Meteo when the toggle above is on."
         }
       }
     }
@@ -53,7 +57,11 @@
           "forecast_models": "Forecast models (select 0–3)",
           "enable_warnings": "Enable weather warnings",
           "enable_air_quality": "Enable air quality index",
-          "enable_open_meteo": "Extend daily forecast via Open-Meteo (up to 14 days)"
+          "enable_open_meteo": "Extend daily forecast via Open-Meteo",
+          "open_meteo_forecast_days": "Days of Open-Meteo forecast extension"
+        },
+        "data_description": {
+          "open_meteo_forecast_days": "Number of days (3–14) filled by Open-Meteo when the toggle above is on."
         }
       }
     },
