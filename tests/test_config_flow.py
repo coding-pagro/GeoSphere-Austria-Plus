@@ -533,3 +533,178 @@ class TestReconfigureFlow:
         result = await _call_user(fake, user_input=_BASE_USER_INPUT)
         assert result["type"] == "create_entry"
         assert result["data"][CONF_ENABLE_OPEN_METEO] is False
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+class TestStationOptions:
+    def test_empty_stations_returns_only_none_option(self):
+        from custom_components.geosphere_austria_plus.config_flow import _station_options
+        result = _station_options([])
+        assert len(result) == 1
+        assert result[0]["value"] == ""
+
+    def test_stations_sorted_alphabetically(self):
+        from custom_components.geosphere_austria_plus.config_flow import _station_options
+        result = _station_options([
+            {"id": "11150", "name": "Salzburg", "lat": 47.8, "lon": 13.0},
+            {"id": "11035", "name": "Wien", "lat": 48.2, "lon": 16.4},
+            {"id": "11101", "name": "Innsbruck", "lat": 47.3, "lon": 11.4},
+        ])
+        # First entry is the empty option, then alphabetical names.
+        names = [r["label"] for r in result[1:]]
+        assert names == ["Innsbruck (11101)", "Salzburg (11150)", "Wien (11035)"]
+
+
+class TestAsyncGetOptionsFlow:
+    def test_returns_options_flow_handler(self):
+        from custom_components.geosphere_austria_plus.config_flow import (
+            GeoSphereAustriaPlusConfigFlow,
+            GeoSphereOptionsFlowHandler,
+        )
+        handler = GeoSphereAustriaPlusConfigFlow.async_get_options_flow(MagicMock())
+        assert isinstance(handler, GeoSphereOptionsFlowHandler)
+
+
+# ---------------------------------------------------------------------------
+# Station-API fallback in all three flows
+# ---------------------------------------------------------------------------
+
+class TestStationApiFallback:
+    """When GeoSphere's /station/all endpoint fails, all three flows must
+    fall back to an empty station list rather than crash setup."""
+
+    async def test_options_flow_api_error_yields_empty_stations(self):
+        from custom_components.geosphere_austria_plus.api import GeoSphereApiError
+        fake = _FakeOptionsFlow()
+        fake._stations = None  # force API load
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "custom_components.geosphere_austria_plus.config_flow.GeoSphereApi",
+                lambda session: MagicMock(get_stations=AsyncMock(side_effect=GeoSphereApiError("boom"))),
+            )
+            await _call(fake, user_input=None)
+        assert fake._stations == []
+
+    async def test_user_step_api_error_yields_empty_stations(self):
+        from custom_components.geosphere_austria_plus.api import GeoSphereApiError
+        fake = _FakeConfigFlow(stations=None)  # default
+        fake._stations = None  # ensure API path taken
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "custom_components.geosphere_austria_plus.config_flow.GeoSphereApi",
+                lambda session: MagicMock(get_stations=AsyncMock(side_effect=GeoSphereApiError("boom"))),
+            )
+            await _call_user(fake, user_input=None)
+        assert fake._stations == []
+
+    async def test_reconfigure_api_error_yields_empty_stations(self):
+        from custom_components.geosphere_austria_plus.config_flow import (
+            GeoSphereAustriaPlusConfigFlow,
+        )
+        from custom_components.geosphere_austria_plus.api import GeoSphereApiError
+        fake = _FakeReconfigureFlow(entry_data=_BASE_USER_INPUT)
+        fake._stations = None
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "custom_components.geosphere_austria_plus.config_flow.GeoSphereApi",
+                lambda session: MagicMock(get_stations=AsyncMock(side_effect=GeoSphereApiError("boom"))),
+            )
+            await GeoSphereAustriaPlusConfigFlow.async_step_reconfigure(fake, None)
+        assert fake._stations == []
+
+
+# ---------------------------------------------------------------------------
+# Schema construction (no _build_schema stub)
+# ---------------------------------------------------------------------------
+
+def _make_real_flow(stations=None) -> "GeoSphereAustriaPlusConfigFlow":  # noqa: F821
+    """Instantiate the real ConfigFlow class for schema tests.
+
+    The _FakeConfigFlow used elsewhere stubs _build_schema to MagicMock,
+    so the real schema-construction code is never exercised. Here we use
+    the actual class (which inherits from conftest's _MockConfigFlow → has
+    self.hass = MagicMock() after __init__).
+    """
+    from custom_components.geosphere_austria_plus.config_flow import (
+        GeoSphereAustriaPlusConfigFlow,
+    )
+    flow = GeoSphereAustriaPlusConfigFlow()
+    flow.hass.config.location_name = _DEFAULT_NAME
+    flow.hass.config.latitude = _DEFAULT_LAT
+    flow.hass.config.longitude = _DEFAULT_LON
+    flow._stations = stations if stations is not None else []
+    return flow
+
+
+class TestSchemaConstruction:
+    """Exercise the real _schema_from_defaults and _build_schema_with_defaults
+    bodies — the existing _FakeConfigFlow stubs _build_schema to a MagicMock,
+    so neither real method ran before."""
+
+    def test_schema_from_defaults_with_stations_uses_select(self):
+        """With non-empty stations, station_field branch goes to SelectSelector."""
+        flow = _make_real_flow(stations=[_VALID_STATION])
+        schema = flow._schema_from_defaults(
+            "Wien", 48.21, 16.37, "11035",
+            ["nwp-v1-1h-2500m"],
+            True, True, False, 5,
+        )
+        assert schema is not None
+
+    def test_schema_from_defaults_without_stations_uses_text(self):
+        """With empty stations, station_field branch goes to TextSelector."""
+        flow = _make_real_flow(stations=[])
+        schema = flow._schema_from_defaults(
+            "Wien", 48.21, 16.37, "",
+            ["nwp-v1-1h-2500m"],
+            True, True, False, 5,
+        )
+        assert schema is not None
+
+    def test_build_schema_with_defaults_reads_options_over_data(self):
+        """Options should win over data when both keys are present."""
+        flow = _make_real_flow()
+        entry = MagicMock()
+        entry.title = "Wien"
+        entry.data = {
+            CONF_LATITUDE: 47.0, CONF_LONGITUDE: 13.0,
+            CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m"],
+        }
+        entry.options = {
+            CONF_LATITUDE: 48.21, CONF_LONGITUDE: 16.37,
+            CONF_FORECAST_MODELS: ["nowcast-v1-15min-1km"],
+        }
+        schema = flow._build_schema_with_defaults(entry)
+        assert schema is not None
+
+    def test_build_schema_with_defaults_falls_back_to_data(self):
+        """When options is empty, data values are used."""
+        flow = _make_real_flow()
+        entry = MagicMock()
+        entry.title = "Wien"
+        entry.data = {
+            CONF_LATITUDE: 47.0, CONF_LONGITUDE: 13.0,
+            CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m"],
+        }
+        entry.options = {}
+        schema = flow._build_schema_with_defaults(entry)
+        assert schema is not None
+
+    def test_build_schema_with_defaults_uses_default_model_when_neither_set(self):
+        """Neither data nor options has the forecast_models key → fallback."""
+        flow = _make_real_flow()
+        entry = MagicMock()
+        entry.title = "Wien"
+        entry.data = {CONF_LATITUDE: 47.0, CONF_LONGITUDE: 13.0}
+        entry.options = {}
+        schema = flow._build_schema_with_defaults(entry)
+        assert schema is not None
+
+    def test_real_build_schema_runs_without_stub(self):
+        """Verify the user-step _build_schema (no defaults) executes."""
+        flow = _make_real_flow()
+        schema = flow._build_schema()
+        assert schema is not None

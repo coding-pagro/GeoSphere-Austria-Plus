@@ -1,0 +1,36 @@
+name: Live API smoke test
+
+# Weekly probe against the real GeoSphere and Open-Meteo APIs.
+# Catches upstream contract changes (renamed params, dropped fields, new
+# error formats) BEFORE users open issues. Failure emails the repo admin
+# via GitHub Actions' built-in scheduled-failure notifications.
+on:
+  schedule:
+    # Monday 06:00 UTC ≈ 07:00 Europe/Vienna — after the weekly model
+    # cycle and before most users hit dashboards.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: # Manual trigger for ad-hoc verification
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Probe real APIs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install runtime dependencies
+        run: pip install aiohttp
+
+      - name: Run live smoke test
+        # The script prints OK/FAIL per probed endpoint and exits non-zero
+        # if any FAIL occurred. Stdout is preserved in the workflow log
+        # for post-mortem debugging.
+        run: python tests/live_integration_test.py

@@ -35,10 +35,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
 
-      - name: Run pytest
+      - name: Run pytest with coverage
         # The conftest mocks Home Assistant entirely, so no HA install is needed.
         # PYTEST_DISABLE_PLUGIN_AUTOLOAD keeps the environment deterministic and
-        # matches local development on Windows.
+        # matches local development on Windows. asyncio and pytest_cov must
+        # therefore be loaded explicitly via -p.
+        # --cov-fail-under=80 acts as a guardrail (baseline ~86 % at time of
+        # introduction) — raise it when fresh tests genuinely lift the floor.
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-        run: pytest tests/ -p asyncio -v
+        run: |
+          pytest tests/ -p asyncio -p pytest_cov -v \
+            --cov=custom_components/geosphere_austria_plus \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=80
+
+      - name: Upload coverage XML (for later badge / Codecov integration)
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14

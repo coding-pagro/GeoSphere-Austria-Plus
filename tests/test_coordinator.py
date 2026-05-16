@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 import pytest
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 # conftest already populated sys.modules with HA stubs.
 # Import from the mocked module so isinstance checks match.
@@ -323,3 +323,120 @@ class TestAirQualityCoordinatorFallback:
 
         with pytest.raises(_UpdateFailed):
             await coord._async_update_data()
+
+
+# ---------------------------------------------------------------------------
+# Open-Meteo coordinator – ClientError / ValueError / KeyError handling
+# ---------------------------------------------------------------------------
+
+class TestOpenMeteoCoordinatorErrorPaths:
+    """Open-Meteo catches aiohttp.ClientError / ValueError / KeyError — not the
+    GeoSphere-specific GeoSphereApiError. Pin those branches explicitly."""
+
+    @pytest.mark.asyncio
+    async def test_client_error_returns_cached_data(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereOpenMeteoDailyCoordinator,
+        )
+        import aiohttp
+        coord = _make_coordinator(GeoSphereOpenMeteoDailyCoordinator, lat=48.2, lon=16.37)
+        coord._session = MagicMock()
+        coord._last_good_data = [{"datetime": "2026-05-16T00:00:00+00:00"}]
+        with patch(
+            "custom_components.geosphere_austria_plus.coordinator.fetch_open_meteo_daily",
+            side_effect=aiohttp.ClientError("connection reset"),
+        ):
+            result = await coord._async_update_data()
+        assert result == [{"datetime": "2026-05-16T00:00:00+00:00"}]
+
+    @pytest.mark.asyncio
+    async def test_value_error_returns_cached_data(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereOpenMeteoDailyCoordinator,
+        )
+        coord = _make_coordinator(GeoSphereOpenMeteoDailyCoordinator, lat=48.2, lon=16.37)
+        coord._session = MagicMock()
+        coord._last_good_data = [{"datetime": "2026-05-16T00:00:00+00:00"}]
+        with patch(
+            "custom_components.geosphere_austria_plus.coordinator.fetch_open_meteo_daily",
+            side_effect=ValueError("malformed JSON"),
+        ):
+            result = await coord._async_update_data()
+        assert result == [{"datetime": "2026-05-16T00:00:00+00:00"}]
+
+    @pytest.mark.asyncio
+    async def test_key_error_without_cache_raises_update_failed(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereOpenMeteoDailyCoordinator,
+        )
+        coord = _make_coordinator(GeoSphereOpenMeteoDailyCoordinator, lat=48.2, lon=16.37)
+        coord._session = MagicMock()
+        with patch(
+            "custom_components.geosphere_austria_plus.coordinator.fetch_open_meteo_daily",
+            side_effect=KeyError("daily"),
+        ):
+            with pytest.raises(_UpdateFailed):
+                await coord._async_update_data()
+
+
+# ---------------------------------------------------------------------------
+# Coordinator __init__ bodies — exercise real constructors
+# ---------------------------------------------------------------------------
+
+class TestCoordinatorConstructors:
+    """The other tests use cls.__new__(cls) to skip __init__ for speed.
+    These tests exercise the real constructors to verify attribute setup
+    and that _retry_init() leaves the mixin in a clean initial state."""
+
+    def _hass(self):
+        h = MagicMock()
+        # async_get_clientsession returns a MagicMock — fine for construction.
+        return h
+
+    def test_current_coordinator_init(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereCurrentCoordinator,
+        )
+        coord = GeoSphereCurrentCoordinator(self._hass(), "11035")
+        assert coord.station_id == "11035"
+        assert coord._last_good_data is None
+        assert coord._retry_step == 0
+        assert coord._cancel_retry is None
+        assert coord._pending_retry_task is None
+
+    def test_forecast_coordinator_init(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereForecastCoordinator,
+        )
+        coord = GeoSphereForecastCoordinator(self._hass(), 48.2, 16.37, "nwp-v1-1h-2500m")
+        assert coord.lat == 48.2
+        assert coord.lon == 16.37
+        assert coord.model == "nwp-v1-1h-2500m"
+        assert coord._last_good_data is None
+        assert coord._retry_step == 0
+
+    def test_warnings_coordinator_init(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereWarningsCoordinator,
+        )
+        coord = GeoSphereWarningsCoordinator(self._hass(), 48.2, 16.37)
+        assert coord.lat == 48.2
+        assert coord.lon == 16.37
+        assert coord._last_good_data is None
+
+    def test_air_quality_coordinator_init(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereAirQualityCoordinator,
+        )
+        coord = GeoSphereAirQualityCoordinator(self._hass(), 48.2, 16.37)
+        assert coord.lat == 48.2
+        assert coord.lon == 16.37
+
+    def test_open_meteo_coordinator_init(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereOpenMeteoDailyCoordinator,
+        )
+        coord = GeoSphereOpenMeteoDailyCoordinator(self._hass(), 48.2, 16.37)
+        assert coord.lat == 48.2
+        assert coord.lon == 16.37
+        assert coord._last_good_data is None

@@ -1,0 +1,30 @@
+# Dependabot configuration — automated PRs for stale dependencies.
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # GitHub Actions used in workflows under .github/workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      # Batch all action bumps into one PR per week to reduce noise.
+      actions-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # Python test dependencies (pytest, pytest-asyncio, aiohttp, coverage).
+  # Production has no requirements (integration uses only HA-bundled libs).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore"
+      include: "scope"
