@@ -323,8 +323,18 @@ class TestConfigFlowUserStep:
     async def test_unique_id_based_on_coordinates(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
         await _call_user(fake, user_input=_BASE_USER_INPUT)
-        expected_uid = f"{round(_DEFAULT_LAT, 3)}_{round(_DEFAULT_LON, 3)}"
+        # 5 Dezimalen → ~1 m Auflösung; verhindert Kollisionen nahe gelegener Stationen.
+        expected_uid = f"{round(_DEFAULT_LAT, 5)}_{round(_DEFAULT_LON, 5)}"
         assert fake._last_unique_id == expected_uid
+
+    async def test_unique_id_distinguishes_nearby_coordinates(self):
+        """Zwei Installationen <100 m Abstand müssen unterschiedliche unique_ids haben."""
+        fake1 = _FakeConfigFlow(stations=[_VALID_STATION])
+        fake2 = _FakeConfigFlow(stations=[_VALID_STATION])
+        # ~80 m Abstand bei lat=48° (1 Dezimalstelle hinter dem dritten Komma)
+        await _call_user(fake1, user_input={**_BASE_USER_INPUT, CONF_LATITUDE: 48.21000, CONF_LONGITUDE: 16.37000})
+        await _call_user(fake2, user_input={**_BASE_USER_INPUT, CONF_LATITUDE: 48.21070, CONF_LONGITUDE: 16.37000})
+        assert fake1._last_unique_id != fake2._last_unique_id
 
     async def test_invalid_models_are_filtered_out(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])

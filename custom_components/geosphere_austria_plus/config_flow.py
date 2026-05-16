@@ -244,7 +244,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input.get(CONF_OPEN_METEO_FORECAST_DAYS, OPEN_METEO_FORECAST_DAYS_DEFAULT)
             )
 
-            await self.async_set_unique_id(f"{round(lat, 3)}_{round(lon, 3)}")
+            await self.async_set_unique_id(f"{round(lat, 5)}_{round(lon, 5)}")
             self._abort_if_unique_id_configured()
 
             return self.async_create_entry(
