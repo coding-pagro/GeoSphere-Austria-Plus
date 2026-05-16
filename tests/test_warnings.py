@@ -208,22 +208,27 @@ class TestWarningSensorNativeValue:
 # GeoSphereWarningSensor – icon
 # ---------------------------------------------------------------------------
 
-class TestWarningSensorIcon:
+class TestWarningSensorIconTranslations:
+    """Icons werden via icons.json statt @property bereitgestellt (Gold-Regel)."""
+
+    @staticmethod
+    def _icons() -> dict:
+        import json
+        from pathlib import Path
+        path = Path(__file__).parent.parent / "custom_components" / "geosphere_austria_plus" / "icons.json"
+        return json.loads(path.read_text(encoding="utf-8"))["entity"]["sensor"]["warning_level"]
+
     def test_icon_outline_when_no_warnings(self):
-        sensor = _make_sensor(warnings=[])
-        assert sensor.icon == "mdi:alert-outline"
+        assert self._icons()["state"]["0"] == "mdi:alert-outline"
 
     def test_icon_alert_for_level_1(self):
-        sensor = _make_sensor(warnings=[{"type_id": 1, "level": 1, "text": "", "effects": "", "recommendations": "", "begin": None, "end": None}])
-        assert sensor.icon == "mdi:alert"
+        assert self._icons()["state"]["1"] == "mdi:alert"
 
     def test_icon_alert_circle_for_level_2(self):
-        sensor = _make_sensor(warnings=[{"type_id": 1, "level": 2, "text": "", "effects": "", "recommendations": "", "begin": None, "end": None}])
-        assert sensor.icon == "mdi:alert-circle"
+        assert self._icons()["state"]["2"] == "mdi:alert-circle"
 
     def test_icon_alert_circle_for_level_3(self):
-        sensor = _make_sensor(warnings=[{"type_id": 1, "level": 3, "text": "", "effects": "", "recommendations": "", "begin": None, "end": None}])
-        assert sensor.icon == "mdi:alert-circle"
+        assert self._icons()["state"]["3"] == "mdi:alert-circle"
 
 
 # ---------------------------------------------------------------------------

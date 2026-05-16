@@ -73,6 +73,29 @@ class TestSensorDescriptions:
                     f"{desc.key} sollte kein DIAGNOSTIC-Entity sein"
                 )
 
+    def test_niche_sensors_disabled_by_default(self):
+        """Spezial-Sensoren sind opt-in (Gold-Regel entity-disabled-by-default)."""
+        expected_disabled = {"pressure_reduced", "sunshine_duration", "global_radiation", "snow_height"}
+        for desc in SENSORS:
+            if desc.key in expected_disabled:
+                assert desc.entity_registry_enabled_default is False, (
+                    f"{desc.key} sollte default-off sein"
+                )
+
+    def test_core_sensors_enabled_by_default(self):
+        """Haupt-Sensoren bleiben default-on."""
+        expected_enabled = {"temperature", "humidity", "pressure", "wind_speed", "precipitation"}
+        for desc in SENSORS:
+            if desc.key in expected_enabled:
+                assert desc.entity_registry_enabled_default is True, (
+                    f"{desc.key} muss default-on bleiben"
+                )
+
+    def test_parallel_updates_zero(self):
+        """Gold-Regel: PARALLEL_UPDATES = 0 (zentrales Coordinator-Polling)."""
+        from custom_components.geosphere_austria_plus import sensor
+        assert sensor.PARALLEL_UPDATES == 0
+
 
 # ---------------------------------------------------------------------------
 # Metadaten

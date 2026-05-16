@@ -81,7 +81,14 @@ class _MockDataUpdateCoordinator:
 
 
 class _MockUpdateFailed(Exception):
-    pass
+    """Mirror HA's UpdateFailed: accepts translation_domain/key/placeholders kwargs."""
+    def __init__(self, message: str = "", *, translation_domain: str | None = None,
+                 translation_key: str | None = None,
+                 translation_placeholders: dict | None = None) -> None:
+        super().__init__(message)
+        self.translation_domain = translation_domain
+        self.translation_key = translation_key
+        self.translation_placeholders = translation_placeholders or {}
 
 
 # ---------------------------------------------------------------------------

@@ -49,6 +49,11 @@ from .coordinator import (
 )
 
 
+# Alle Daten werden zentral pro Coordinator abgerufen — Entities pollen nicht
+# selbst. Daher kein Limit auf parallele State-Updates nötig.
+PARALLEL_UPDATES = 0
+
+
 def _make_device_info(entry_id: str, location_name: str) -> DeviceInfo:
     """Gemeinsame DeviceInfo für alle GeoSphere-Entities."""
     return DeviceInfo(
@@ -123,6 +128,9 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfPressure.HPA,
         device_class=SensorDeviceClass.PRESSURE,
         state_class=SensorStateClass.MEASUREMENT,
+        # Spezialwert (auf Meereshöhe reduziert) — User die das wollen,
+        # aktivieren ihn explizit. Vermeidet Doppelt-Pressure-Sensoren.
+        entity_registry_enabled_default=False,
     ),
     TawesSensorDescription(
         key="precipitation",      translation_key="precipitation",
@@ -137,6 +145,8 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTime.SECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
+        # Niche-Einheit (s/10min) — selten in Dashboards genutzt.
+        entity_registry_enabled_default=False,
     ),
     TawesSensorDescription(
         key="snow_height",        translation_key="snow_height",
@@ -144,6 +154,8 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfLength.CENTIMETERS,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:snowflake",
+        # Saisonaler Sensor — User in Bergregionen aktivieren ihn manuell.
+        entity_registry_enabled_default=False,
     ),
     TawesSensorDescription(
         key="global_radiation",   translation_key="global_radiation",
@@ -151,6 +163,8 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfIrradiance.WATTS_PER_SQUARE_METER,
         device_class=SensorDeviceClass.IRRADIANCE,
         state_class=SensorStateClass.MEASUREMENT,
+        # Spezialsensor (PV/Solar-Use-Case) — opt-in.
+        entity_registry_enabled_default=False,
     ),
     TawesSensorDescription(
         key="soil_temperature_10cm", translation_key="soil_temperature_10cm",
@@ -337,15 +351,6 @@ class GeoSphereWarningSensor(
         return max(w["level"] for w in warnings)
 
     @property
-    def icon(self) -> str:
-        level = self.native_value
-        if level == 0:
-            return "mdi:alert-outline"
-        if level == 1:
-            return "mdi:alert"
-        return "mdi:alert-circle"
-
-    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Alle aktiven Warnungen als strukturierte Attribute."""
         warnings = self.coordinator.data or []
@@ -486,17 +491,6 @@ class AirQualityIndexSensor(_AirQualityBase):
             if values and idx < len(values):
                 indices.append(_compute_aqi_level(values[idx], param))
         return max(indices) if indices else None
-
-    @property
-    def icon(self) -> str:
-        level = self.native_value or 1
-        if level <= 2:
-            return "mdi:leaf"
-        if level == 3:
-            return "mdi:alert-circle-outline"
-        if level == 4:
-            return "mdi:alert-circle"
-        return "mdi:biohazard"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

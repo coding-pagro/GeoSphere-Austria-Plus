@@ -321,37 +321,37 @@ class TestAirQualityIndexSensorNativeValue:
 # AirQualityIndexSensor – icon
 # ---------------------------------------------------------------------------
 
-class TestAirQualityIndexSensorIcon:
+class TestAirQualityIndexIconTranslations:
+    """Icons werden via icons.json statt @property bereitgestellt (Gold-Regel)."""
+
+    @staticmethod
+    def _icons() -> dict:
+        import json
+        from pathlib import Path
+        path = Path(__file__).parent.parent / "custom_components" / "geosphere_austria_plus" / "icons.json"
+        return json.loads(path.read_text(encoding="utf-8"))["entity"]["sensor"]["aqi"]
+
     def test_icon_level_1_leaf(self):
-        sensor = _make_aqi_sensor(data=_make_aq_data())
-        assert sensor.icon == "mdi:leaf"
+        assert self._icons()["state"]["1"] == "mdi:leaf"
 
     def test_icon_level_2_leaf(self):
-        sensor = _make_aqi_sensor(data=_make_aq_data(no2=50.0))
-        assert sensor.icon == "mdi:leaf"
+        assert self._icons()["state"]["2"] == "mdi:leaf"
 
     def test_icon_level_3_alert_outline(self):
-        # NO2=95 → level 3 (range 90–119)
-        sensor = _make_aqi_sensor(data=_make_aq_data(no2=95.0))
-        assert sensor.icon == "mdi:alert-circle-outline"
+        assert self._icons()["state"]["3"] == "mdi:alert-circle-outline"
 
     def test_icon_level_4_alert_circle(self):
-        # NO2=125 → level 4 (range 120–229)
-        sensor = _make_aqi_sensor(data=_make_aq_data(no2=125.0))
-        assert sensor.icon == "mdi:alert-circle"
+        assert self._icons()["state"]["4"] == "mdi:alert-circle"
 
     def test_icon_level_5_biohazard(self):
-        sensor = _make_aqi_sensor(data=_make_aq_data(no2=341.0))
-        assert sensor.icon == "mdi:biohazard"
+        assert self._icons()["state"]["5"] == "mdi:biohazard"
 
     def test_icon_level_6_biohazard(self):
-        sensor = _make_aqi_sensor(data=_make_aq_data(pm25=80.0))
-        assert sensor.icon == "mdi:biohazard"
+        assert self._icons()["state"]["6"] == "mdi:biohazard"
 
-    def test_icon_no_data_defaults_leaf(self):
-        sensor = _make_aqi_sensor(data=None)
-        # native_value is None → or 1 → mdi:leaf
-        assert sensor.icon == "mdi:leaf"
+    def test_icon_default_leaf(self):
+        """Default-Icon (kein State-Match) → mdi:leaf."""
+        assert self._icons()["default"] == "mdi:leaf"
 
 
 # ---------------------------------------------------------------------------

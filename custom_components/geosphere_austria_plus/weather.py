@@ -53,6 +53,10 @@ from .coordinator import (
 _LOGGER = logging.getLogger(__name__)
 _TZ_VIENNA = ZoneInfo("Europe/Vienna")
 
+# Alle Daten werden zentral pro Coordinator abgerufen — Entities pollen nicht
+# selbst. Daher kein Limit auf parallele State-Updates nötig.
+PARALLEL_UPDATES = 0
+
 # Schwellenwerte für Conditions aus Stationsdaten
 _RAIN_THRESHOLD_MM = 0.2      # RR > 0.2 mm/10min → Regen
 _HEAVY_RAIN_MM = 1.0           # > 1.0 mm/10min → Starkregen
