@@ -1,0 +1,32 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Weekly run so deprecations in HA core or HACS surface even when
+    # the repo is quiet.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  hassfest:
+    name: Hassfest (HA integration manifest validator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
