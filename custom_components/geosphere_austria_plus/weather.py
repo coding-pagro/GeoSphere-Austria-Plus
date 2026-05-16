@@ -277,6 +277,14 @@ class GeoSphereWeatherEntity(
 
         self._attr_name = FORECAST_MODEL_LABELS.get(model, model)
 
+        # Nowcast liefert nur kurzfristige Stundendaten — kein Daily-Forecast.
+        if "nowcast" in model:
+            self._attr_supported_features = WeatherEntityFeature.FORECAST_HOURLY
+        else:
+            self._attr_supported_features = (
+                WeatherEntityFeature.FORECAST_HOURLY | WeatherEntityFeature.FORECAST_DAILY
+            )
+
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name=location_name,
@@ -285,13 +293,6 @@ class GeoSphereWeatherEntity(
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
-
-    @property
-    def supported_features(self) -> WeatherEntityFeature:
-        """Nowcast liefert nur kurzfristige Stundendaten – kein Daily-Forecast."""
-        if "nowcast" in self._model:
-            return WeatherEntityFeature.FORECAST_HOURLY
-        return WeatherEntityFeature.FORECAST_HOURLY | WeatherEntityFeature.FORECAST_DAILY
 
     @property
     def attribution(self) -> str | None:
@@ -581,6 +582,11 @@ class GeoSphereWeatherEntity(
                 native_wind_gust_speed=wind_gust,
                 is_daytime=is_day,
             )
+            # Forecast ist ein TypedDict — HA preserved zusätzliche Keys beim
+            # Übergeben an den Frontend-Service (verifiziert mit HA 2024.4+).
+            # `type: ignore` ist nötig weil das TypedDict diese Keys nicht
+            # deklariert; sollte HA das Verhalten je ändern, ist hier der
+            # zentrale Ort für eine Anpassung (z.B. via extra_state_attributes).
             grad = entry.get("grad")
             if grad is not None:
                 forecast_entry["solar_irradiance"] = round(grad, 1)  # type: ignore[typeddict-unknown-key]

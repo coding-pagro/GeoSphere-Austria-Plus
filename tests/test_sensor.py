@@ -58,6 +58,21 @@ class TestSensorDescriptions:
         params = [d.param for d in SENSORS]
         assert len(params) == len(set(params))
 
+    def test_soil_temperature_is_diagnostic_entity(self):
+        """Bodentemperatur ist kein Hauptsensor → entity_category=DIAGNOSTIC."""
+        from homeassistant.const import EntityCategory
+        soil = next(d for d in SENSORS if d.key == "soil_temperature_10cm")
+        assert soil.entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_main_sensors_are_not_diagnostic(self):
+        """Haupt-Wetter-Sensoren (Temperatur etc.) bleiben in der Standard-Ansicht."""
+        main_keys = {"temperature", "humidity", "pressure", "wind_speed", "precipitation"}
+        for desc in SENSORS:
+            if desc.key in main_keys:
+                assert desc.entity_category is None, (
+                    f"{desc.key} sollte kein DIAGNOSTIC-Entity sein"
+                )
+
 
 # ---------------------------------------------------------------------------
 # Metadaten

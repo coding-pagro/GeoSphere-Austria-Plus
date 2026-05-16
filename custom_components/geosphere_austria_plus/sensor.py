@@ -16,6 +16,7 @@ from homeassistant.const import (
     CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     DEGREE,
     PERCENTAGE,
+    EntityCategory,
     UnitOfIrradiance,
     UnitOfLength,
     UnitOfPressure,
@@ -157,6 +158,7 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
 

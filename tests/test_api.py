@@ -203,6 +203,30 @@ class TestExtractMissingParams:
         from custom_components.geosphere_austria_plus.api import GeoSphereApi
         assert GeoSphereApi._extract_missing_params("some other error") == set()
 
+    def test_logs_warning_when_parameter_message_but_no_brace_set(self, caplog):
+        """API-Änderung erkennen: 'Parameter' im Detail aber kein {…}-Set."""
+        from custom_components.geosphere_austria_plus.api import GeoSphereApi
+        import logging
+        caplog.set_level(logging.WARNING, logger="custom_components.geosphere_austria_plus.api")
+        result = GeoSphereApi._extract_missing_params(
+            "Parameter SH is not available (new API error format!)"
+        )
+        assert result == set()
+        # Eine Warnung muss aufgetaucht sein, die den Detail-String enthält.
+        assert any(
+            "parameter" in r.message.lower() and "new api error format" in r.message.lower()
+            for r in caplog.records
+        )
+
+    def test_no_log_when_detail_is_unrelated(self, caplog):
+        """Allgemeine 400er ohne Parameter-Bezug dürfen NICHT als Regex-Bruch geloggt werden."""
+        from custom_components.geosphere_austria_plus.api import GeoSphereApi
+        import logging
+        caplog.set_level(logging.WARNING, logger="custom_components.geosphere_austria_plus.api")
+        result = GeoSphereApi._extract_missing_params("Invalid station id")
+        assert result == set()
+        assert caplog.records == []
+
 
 class TestGetCurrent:
     async def test_success_calls_parse(self):

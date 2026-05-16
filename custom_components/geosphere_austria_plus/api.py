@@ -225,9 +225,23 @@ class GeoSphereApi:
 
     @staticmethod
     def _extract_missing_params(detail: str) -> set[str]:
-        """Extrahiert Parameternamen aus einer API-400-Fehlermeldung."""
+        """Extrahiert Parameternamen aus einer API-400-Fehlermeldung.
+
+        Die GeoSphere-API liefert ihre Detail-Strings in der Form
+        ``... not found in resource: {param_a, param_b}``. Ändert sich
+        dieses Format, kann der Parameter-Removal-Retry nicht mehr greifen
+        — daher wird in dem Fall eine Warnung geloggt.
+        """
         match = re.search(r"\{([^}]+)\}", detail)
         if not match:
+            # Wenn der Detail-String gegen Parameter sprechen sollte, aber
+            # kein Match liefert, ist das ein Hinweis auf eine API-Änderung.
+            if detail and "parameter" in detail.lower():
+                _LOGGER.warning(
+                    "GeoSphere-400-Detail enthält kein Parameter-Set in {…}-Notation "
+                    "— Parameter-Removal-Retry kann nicht greifen. Detail: %s",
+                    detail,
+                )
             return set()
         return {p.strip().strip("'\"") for p in match.group(1).split(",")}
 
