@@ -1,0 +1,97 @@
+rules:
+  # ─── Bronze ────────────────────────────────────────────────────────
+  action-setup: done
+  appropriate-polling: done
+  brands: done
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage: done
+  dependency-transparency: done
+  docs-actions:
+    status: exempt
+    comment: |
+      Integration registriert keine eigenen Services/Actions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup:
+    status: exempt
+    comment: |
+      Keine Entities, die HA-Events während setup abonnieren.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # ─── Silver ────────────────────────────────────────────────────────
+  action-exceptions:
+    status: exempt
+    comment: |
+      Keine eigenen Services/Actions.
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow:
+    status: exempt
+    comment: |
+      Integration nutzt keine Credentials — GeoSphere DataHub ist
+      öffentlich, keine Authentifizierung erforderlich.
+  test-coverage: done
+
+  # ─── Gold ──────────────────────────────────────────────────────────
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: |
+      Cloud-Integration ohne lokales Discovery-Protokoll. Standort wird
+      per Konfiguration angegeben.
+  discovery-update-info:
+    status: exempt
+    comment: |
+      Kein Discovery → keine Update-Info nötig.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices:
+    status: exempt
+    comment: |
+      Keine physischen Geräte — GeoSphere ist ein Cloud-Datenservice.
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: |
+      Statisches Modell: ein Gerät pro Config-Entry. Keine dynamisch
+      hinzukommenden Geräte.
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default: done
+  entity-translations: done
+  exception-translations: done
+  icon-translations: done
+  reconfiguration-flow: done
+  repair-issues: done
+  stale-devices:
+    status: exempt
+    comment: |
+      Statisches 1-Gerät-pro-Entry-Modell. Geräte-Cleanup wird bei
+      Entry-Removal von HA selbst übernommen.
+
+  # ─── Platinum (nicht angestrebt) ───────────────────────────────────
+  async-dependency:
+    status: exempt
+    comment: Out of scope für diese Iteration.
+  inject-websession:
+    status: exempt
+    comment: Out of scope für diese Iteration.
+  strict-typing:
+    status: exempt
+    comment: Out of scope für diese Iteration.
