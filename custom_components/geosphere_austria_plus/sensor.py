@@ -379,18 +379,38 @@ class _AirQualityBase(
     _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
 
+    def __init__(self, coordinator: GeoSphereAirQualityCoordinator) -> None:
+        super().__init__(coordinator)
+        # Cache: (id(data), index). Wird invalidiert sobald coordinator.data
+        # ein neues Objekt referenziert (= neuer Update-Zyklus).
+        self._cached_idx: tuple[int, int] | None = None
+
     def _current_index(self) -> int:
-        """Index des ersten aktuellen/zukünftigen Vorhersagepunkts."""
-        timestamps: list[str] = (self.coordinator.data or {}).get("timestamps", [])
+        """Index des ersten aktuellen/zukünftigen Vorhersagepunkts.
+
+        Innerhalb eines Update-Zyklus wird das Ergebnis gecacht, weil
+        `native_value` und `extra_state_attributes` denselben Wert je
+        State-Update zweimal anfordern.
+        """
+        data = self.coordinator.data
+        data_id = id(data)
+        if self._cached_idx is not None and self._cached_idx[0] == data_id:
+            return self._cached_idx[1]
+
+        timestamps: list[str] = (data or {}).get("timestamps", [])
         now = datetime.now(timezone.utc)
+        idx = 0
         for i, ts_str in enumerate(timestamps):
             try:
                 dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             except ValueError:
                 continue
             if dt >= now - timedelta(hours=1):
-                return i
-        return 0
+                idx = i
+                break
+
+        self._cached_idx = (data_id, idx)
+        return idx
 
 
 class AirQualitySensor(_AirQualityBase):
