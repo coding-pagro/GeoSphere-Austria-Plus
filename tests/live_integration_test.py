@@ -63,12 +63,18 @@ GREEN = "\033[92m"
 RED = "\033[91m"
 RESET = "\033[0m"
 
+# Failure counter — script exits with this value so CI / wrappers see
+# a non-zero status when any probe failed.
+_FAILURES = 0
+
 
 def ok(msg):
     print(f"  {GREEN}OK{RESET} {msg}")
 
 
 def fail(msg):
+    global _FAILURES
+    _FAILURES += 1
     print(f"  {RED}FAIL{RESET} {msg}")
 
 
@@ -133,3 +139,4 @@ async def run_tests():
 
 if __name__ == "__main__":
     asyncio.run(run_tests())
+    sys.exit(_FAILURES)
