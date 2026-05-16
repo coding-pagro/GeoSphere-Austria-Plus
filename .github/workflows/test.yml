@@ -51,7 +51,18 @@ jobs:
             --cov-report=xml \
             --cov-fail-under=80
 
-      - name: Upload coverage XML (for later badge / Codecov integration)
+      - name: Upload coverage to Codecov
+        # Only from the Python 3.13 matrix entry to avoid double-counting.
+        # Public-repo uploads work without a token but may get rate-limited
+        # — add CODECOV_TOKEN as a repo secret if uploads start being rejected.
+        if: matrix.python-version == '3.13'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: false  # token-less uploads can transiently fail; don't break CI
+
+      - name: Upload coverage XML artifact (fallback debugging)
         if: matrix.python-version == '3.13'
         uses: actions/upload-artifact@v7
         with:
