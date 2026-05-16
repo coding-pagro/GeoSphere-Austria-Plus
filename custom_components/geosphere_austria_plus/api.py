@@ -258,7 +258,14 @@ class GeoSphereApi:
         result: dict[str, Any] = {}
         for param_name, param_data in parameters.items():
             values = param_data.get("data", [])
-            result[param_name] = values[-1] if values else None
+            if not values:
+                # Station liefert den Parameter-Slot, aber ohne Messwerte (z.B.
+                # TB1 an Stationen ohne Bodensonde). Key NICHT setzen, damit der
+                # Sensor `unavailable` zeigt statt `unknown`. Wenn dagegen
+                # values[-1] = None ist (kurzzeitiger Datenausfall), wird der
+                # Key gesetzt und der Sensor zeigt `unknown` — gewolltes Verhalten.
+                continue
+            result[param_name] = values[-1]
 
         # Koordinaten für spätere Verwendung (mit Bounds-Validierung)
         coords = feature.get("geometry", {}).get("coordinates", [])

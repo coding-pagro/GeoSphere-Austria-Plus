@@ -83,17 +83,43 @@ class TestParseStationGeoJSON:
         assert result["_lat"] == 48.21
         assert "_alt" not in result
 
-    def test_empty_param_data_returns_none(self):
+    def test_empty_param_data_skips_key(self):
+        """Station liefert den Parameter-Slot ohne Messwerte (z.B. TB1 an
+        Stationen ohne Bodensonde) → Key wird gar nicht gesetzt, damit der
+        Sensor 'unavailable' zeigt statt 'unknown'."""
         api = _make_api()
         data = {
             "features": [
                 {
                     "geometry": {"coordinates": [16.37, 48.21]},
-                    "properties": {"parameters": {"TL": {"data": []}}},
+                    "properties": {
+                        "parameters": {
+                            "TL": {"data": [12.0]},
+                            "TB1": {"data": []},  # no soil probe at this station
+                        }
+                    },
                 }
             ]
         }
         result = api._parse_station_geojson(data, "11035")
+        assert result["TL"] == 12.0
+        assert "TB1" not in result
+
+    def test_explicit_none_value_kept(self):
+        """values[-1] == None (transient measurement gap, array non-empty)
+        → Key is set with value None → Sensor shows 'unknown' rather than
+        flipping to 'unavailable'."""
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [16.37, 48.21]},
+                    "properties": {"parameters": {"TL": {"data": [12.0, None]}}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "11035")
+        assert "TL" in result
         assert result["TL"] is None
 
     def test_empty_features_raises(self):
