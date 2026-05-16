@@ -428,3 +428,61 @@ class TestAsyncUnloadEntry:
 
         assert result is False
         assert entry.entry_id in hass.data[DOMAIN]
+
+    async def test_unload_cancels_pending_retries_on_all_coordinators(self):
+        """H2: Beim Unload müssen alle Coordinator-Retry-Timer/Tasks abgebrochen
+        werden — sowohl Top-Level- als auch DATA_FORECASTS-Coordinatoren."""
+        entry = _make_entry(data=_BASE_DATA)
+        hass = _make_hass()
+        # Coordinator-Mocks, die _cancel_pending_retry haben
+        top_coord = MagicMock()
+        top_coord._cancel_pending_retry = MagicMock()
+        nested_coord = MagicMock()
+        nested_coord._cancel_pending_retry = MagicMock()
+
+        coordinators = {
+            DATA_CURRENT: top_coord,
+            DATA_FORECASTS: {"nwp-v1-1h-2500m": nested_coord},
+            "_active_unique_ids": set(),  # Strings/Sets ohne _cancel_pending_retry
+        }
+        hass.data = {DOMAIN: {entry.entry_id: coordinators}}
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+        from custom_components.geosphere_austria_plus import async_unload_entry
+        await async_unload_entry(hass, entry)
+
+        top_coord._cancel_pending_retry.assert_called_once()
+        nested_coord._cancel_pending_retry.assert_called_once()
+
+
+class TestActiveUniqueIdsCleanup:
+    async def test_active_unique_ids_initialized_upfront(self):
+        """H3: _active_unique_ids muss vor async_forward_entry_setups
+        im coordinators-Dict existieren, damit Plattformen es nutzen können —
+        auch wenn eine Plattform mid-setup crashed."""
+        entry = _make_entry(data=_BASE_DATA)
+        hass = _make_hass()
+
+        captured = {}
+
+        async def _capture_coordinators_state(_entry, _platforms):
+            # Snapshot zum Zeitpunkt des Forward-Calls
+            captured["coords"] = dict(hass.data[DOMAIN][_entry.entry_id])
+
+        hass.config_entries.async_forward_entry_setups = AsyncMock(
+            side_effect=_capture_coordinators_state
+        )
+
+        with (
+            patch(f"{_PATCH_BASE}.GeoSphereForecastCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereWarningsCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereAirQualityCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+        # Beim forward_entry_setups-Aufruf MUSS der Key bereits vorhanden sein.
+        assert "_active_unique_ids" in captured["coords"]
+        assert isinstance(captured["coords"]["_active_unique_ids"], set)
