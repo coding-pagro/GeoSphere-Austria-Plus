@@ -1,12 +1,13 @@
 """DataUpdateCoordinator für GeoSphere Austria Plus."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any
 
 import aiohttp
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -40,12 +41,24 @@ class _RetryMixin:
     def _retry_init(self) -> None:
         self._retry_step: int = 0
         self._cancel_retry: Any = None
+        self._pending_retry_task: asyncio.Task | None = None
 
-    def _retry_on_success(self, data: Any) -> Any:
-        """Daten cachen, Retry-Zähler zurücksetzen, geplante Retries abbrechen."""
+    def _cancel_pending_retry(self) -> None:
+        """Geplanten Retry-Timer **und** bereits gestarteten Refresh-Task abbrechen.
+
+        Wird bei Coordinator-Shutdown aufgerufen (siehe __init__.async_unload_entry),
+        damit kein Refresh auf einem zerstörten Coordinator läuft.
+        """
         if self._cancel_retry is not None:
             self._cancel_retry()
             self._cancel_retry = None
+        if self._pending_retry_task is not None and not self._pending_retry_task.done():
+            self._pending_retry_task.cancel()
+        self._pending_retry_task = None
+
+    def _retry_on_success(self, data: Any) -> Any:
+        """Daten cachen, Retry-Zähler zurücksetzen, geplante Retries abbrechen."""
+        self._cancel_pending_retry()
         self._retry_step = 0
         self._last_good_data = data
         return data
@@ -55,12 +68,15 @@ class _RetryMixin:
 
         Gibt None zurück wenn kein Cache vorhanden → Aufrufer soll UpdateFailed werfen.
         """
-        if self._cancel_retry is not None:
-            self._cancel_retry()
-            self._cancel_retry = None
+        self._cancel_pending_retry()
 
         if self._last_good_data is None:
             return None
+
+        # Während HA-Shutdown keinen Retry mehr planen — sonst läuft der Refresh
+        # auf einem zerstörten Coordinator.
+        if self.hass.state == CoreState.stopping:
+            return self._last_good_data
 
         delay = _RETRY_INTERVALS[self._retry_step]
         self._retry_step = min(self._retry_step + 1, len(_RETRY_INTERVALS) - 1)
@@ -68,10 +84,13 @@ class _RetryMixin:
             "%s nicht erreichbar, verwende letzte bekannte Daten (Retry in %d min): %s",
             label, delay, err,
         )
-        self._cancel_retry = self.hass.async_call_later(
-            delay * 60,
-            lambda _: self.hass.async_create_task(self.async_refresh()),
-        )
+
+        def _trigger_retry(_now: Any) -> None:
+            """Timer-Callback: Refresh als trackbaren Task starten."""
+            self._cancel_retry = None
+            self._pending_retry_task = self.hass.async_create_task(self.async_refresh())
+
+        self._cancel_retry = self.hass.async_call_later(delay * 60, _trigger_retry)
         return self._last_good_data
 
 
@@ -97,7 +116,11 @@ class GeoSphereCurrentCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str, A
             cached = self._retry_on_failure("GeoSphere TAWES", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"GeoSphere API Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="tawes_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
 
 class GeoSphereForecastCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[str, Any]]]):
@@ -132,7 +155,11 @@ class GeoSphereForecastCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[
             cached = self._retry_on_failure(f"GeoSphere Vorhersage ({self.model})", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"GeoSphere Vorhersage Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="forecast_api_error",
+                translation_placeholders={"model": self.model, "error": str(err)},
+            ) from err
 
 
 class GeoSphereWarningsCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[str, Any]]]):
@@ -160,7 +187,11 @@ class GeoSphereWarningsCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[
             cached = self._retry_on_failure("Warnungs-API", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"Warnungs-API Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="warnings_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
 
 class GeoSphereAirQualityCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str, Any]]):
@@ -188,7 +219,11 @@ class GeoSphereAirQualityCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str
             cached = self._retry_on_failure("Luftqualitäts-API", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"Schadstoff-API Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="air_quality_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
 
 class GeoSphereOpenMeteoDailyCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[str, Any]]]):
@@ -216,4 +251,8 @@ class GeoSphereOpenMeteoDailyCoordinator(_RetryMixin, DataUpdateCoordinator[list
             cached = self._retry_on_failure("Open-Meteo", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"Open-Meteo Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="open_meteo_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err

@@ -53,6 +53,10 @@ from .coordinator import (
 _LOGGER = logging.getLogger(__name__)
 _TZ_VIENNA = ZoneInfo("Europe/Vienna")
 
+# Alle Daten werden zentral pro Coordinator abgerufen — Entities pollen nicht
+# selbst. Daher kein Limit auf parallele State-Updates nötig.
+PARALLEL_UPDATES = 0
+
 # Schwellenwerte für Conditions aus Stationsdaten
 _RAIN_THRESHOLD_MM = 0.2      # RR > 0.2 mm/10min → Regen
 _HEAVY_RAIN_MM = 1.0           # > 1.0 mm/10min → Starkregen
@@ -277,6 +281,14 @@ class GeoSphereWeatherEntity(
 
         self._attr_name = FORECAST_MODEL_LABELS.get(model, model)
 
+        # Nowcast liefert nur kurzfristige Stundendaten — kein Daily-Forecast.
+        if "nowcast" in model:
+            self._attr_supported_features = WeatherEntityFeature.FORECAST_HOURLY
+        else:
+            self._attr_supported_features = (
+                WeatherEntityFeature.FORECAST_HOURLY | WeatherEntityFeature.FORECAST_DAILY
+            )
+
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name=location_name,
@@ -285,13 +297,6 @@ class GeoSphereWeatherEntity(
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://dataset.api.hub.geosphere.at/v1",
         )
-
-    @property
-    def supported_features(self) -> WeatherEntityFeature:
-        """Nowcast liefert nur kurzfristige Stundendaten – kein Daily-Forecast."""
-        if "nowcast" in self._model:
-            return WeatherEntityFeature.FORECAST_HOURLY
-        return WeatherEntityFeature.FORECAST_HOURLY | WeatherEntityFeature.FORECAST_DAILY
 
     @property
     def attribution(self) -> str | None:
@@ -520,6 +525,14 @@ class GeoSphereWeatherEntity(
         forecasts: list[Forecast] = []
         now = datetime.now(timezone.utc)
 
+        # Nowcast tcc-Kontext einmal pro Build vorbereiten (vermeidet, dass
+        # jeder Forecast-Eintrag erneut über alle Forecast-Koordinatoren iteriert).
+        nowcast_tcc_ctx = (
+            self._prepare_nowcast_tcc_context()
+            if "nowcast" in self._model
+            else None
+        )
+
         for entry in self._forecast_raw:
             ts_str = entry.get("datetime")
             if not ts_str:
@@ -544,8 +557,8 @@ class GeoSphereWeatherEntity(
             vgust = entry.get("vgust")
             tcc = entry.get("tcc")
             # Nowcast never provides tcc; resolve from NWP/TAWES blend when available.
-            if tcc is None and "nowcast" in self._model:
-                tcc = self._resolve_tcc_for_nowcast(dt)
+            if tcc is None and nowcast_tcc_ctx is not None:
+                tcc = self._resolve_tcc_with_context(dt, nowcast_tcc_ctx, now)
             wind_speed = math.sqrt(u10**2 + v10**2)
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
             if ugust is not None and vgust is not None:
@@ -573,6 +586,11 @@ class GeoSphereWeatherEntity(
                 native_wind_gust_speed=wind_gust,
                 is_daytime=is_day,
             )
+            # Forecast ist ein TypedDict — HA preserved zusätzliche Keys beim
+            # Übergeben an den Frontend-Service (verifiziert mit HA 2024.4+).
+            # `type: ignore` ist nötig weil das TypedDict diese Keys nicht
+            # deklariert; sollte HA das Verhalten je ändern, ist hier der
+            # zentrale Ort für eine Anpassung (z.B. via extra_state_attributes).
             grad = entry.get("grad")
             if grad is not None:
                 forecast_entry["solar_irradiance"] = round(grad, 1)  # type: ignore[typeddict-unknown-key]
@@ -790,6 +808,81 @@ class GeoSphereWeatherEntity(
     # Nowcast tcc resolution
     # ------------------------------------------------------------------
 
+    def _prepare_nowcast_tcc_context(
+        self,
+    ) -> tuple[list[dict] | None, float | None]:
+        """Vorberechnung für Nowcast-tcc-Auflösung — einmal pro Forecast-Build.
+
+        Cacht NWP-Coordinator-Daten und TAWES-tcc-Proxy, damit nicht jeder
+        Forecast-Eintrag erneut über alle Forecast-Koordinatoren iteriert.
+
+        Liefert: (nwp_data, tcc_tawes)
+        """
+        # NWP-Daten (erste passende NWP-Coordinator-Instanz)
+        nwp_data: list[dict] | None = None
+        for name, coord in self._all_forecast_coordinators.items():
+            if "nwp" not in name:
+                continue
+            if coord.data:
+                nwp_data = coord.data
+            break
+
+        # TAWES-tcc-Proxy aus aktueller Sonnenscheindauer (konstant pro Build)
+        tcc_tawes: float | None = None
+        if self._current_coordinator and self._current_coordinator.data:
+            so = self._current_coordinator.data.get("SO")
+            if so is not None:
+                tcc_tawes = 1.0 - min(float(so) / _SUN_SECONDS_MAX, 1.0)
+
+        return nwp_data, tcc_tawes
+
+    def _resolve_tcc_with_context(
+        self,
+        dt: datetime,
+        context: tuple[list[dict] | None, float | None],
+        now: datetime,
+    ) -> float | None:
+        """Reine Auflösungs-Logik mit vorberechnetem Kontext (Hot Path).
+
+        Identisch zur public `_resolve_tcc_for_nowcast(dt)`, aber ohne die
+        wiederholte Vorberechnung der Coordinator-Daten und der TAWES-SO-Werte.
+        """
+        nwp_data, tcc_tawes = context
+        _NOWCAST_HORIZON_S = 3 * 3600  # 3 hours in seconds
+
+        # ── 1. NWP tcc for this timestep ──────────────────────────────
+        tcc_nwp: float | None = None
+        if nwp_data:
+            try:
+                nearest = min(
+                    nwp_data,
+                    key=lambda e: abs(
+                        (
+                            datetime.fromisoformat(
+                                e["datetime"].replace("Z", "+00:00")
+                            )
+                            - dt
+                        ).total_seconds()
+                    ),
+                )
+                tcc_nwp = nearest.get("tcc")
+            except (ValueError, KeyError, TypeError):
+                pass
+
+        # ── 2. Blend / fallback ────────────────────────────────────────
+        if tcc_nwp is not None and tcc_tawes is not None:
+            elapsed = max((dt - now).total_seconds(), 0.0)
+            w_nwp = min(elapsed / _NOWCAST_HORIZON_S, 1.0)
+            return (1.0 - w_nwp) * tcc_tawes + w_nwp * tcc_nwp
+
+        if tcc_nwp is not None:
+            return tcc_nwp
+
+        if tcc_tawes is not None:
+            return tcc_tawes
+
+        return None
+
     def _resolve_tcc_for_nowcast(self, dt: datetime) -> float | None:
         """Resolve cloud-cover fraction (0–1) for a Nowcast timestep.
 
@@ -813,54 +906,13 @@ class GeoSphereWeatherEntity(
 
         4. Neither available
            → returns None → caller falls through to sunny/clear-night.
+
+        Hinweis: Bei Forecast-Builds wird statt dieser Methode der Hot-Path
+        `_resolve_tcc_with_context` mit vorberechnetem Kontext aufgerufen.
         """
-        now = datetime.now(timezone.utc)
-        _NOWCAST_HORIZON_S = 3 * 3600  # 3 hours in seconds
-
-        # ── 1. NWP tcc for this timestep ──────────────────────────────
-        tcc_nwp: float | None = None
-        for name, coord in self._all_forecast_coordinators.items():
-            if "nwp" not in name:
-                continue
-            if not coord.data:
-                continue
-            try:
-                nearest = min(
-                    coord.data,
-                    key=lambda e: abs(
-                        (
-                            datetime.fromisoformat(
-                                e["datetime"].replace("Z", "+00:00")
-                            )
-                            - dt
-                        ).total_seconds()
-                    ),
-                )
-                tcc_nwp = nearest.get("tcc")
-            except (ValueError, KeyError, TypeError):
-                pass
-            break  # use the first matching NWP coordinator
-
-        # ── 2. TAWES-derived tcc proxy ─────────────────────────────────
-        tcc_tawes: float | None = None
-        if self._current_coordinator and self._current_coordinator.data:
-            so = self._current_coordinator.data.get("SO")
-            if so is not None:
-                tcc_tawes = 1.0 - min(float(so) / _SUN_SECONDS_MAX, 1.0)
-
-        # ── 3. Blend / fallback ────────────────────────────────────────
-        if tcc_nwp is not None and tcc_tawes is not None:
-            elapsed = max((dt - now).total_seconds(), 0.0)
-            w_nwp = min(elapsed / _NOWCAST_HORIZON_S, 1.0)
-            return (1.0 - w_nwp) * tcc_tawes + w_nwp * tcc_nwp
-
-        if tcc_nwp is not None:
-            return tcc_nwp
-
-        if tcc_tawes is not None:
-            return tcc_tawes
-
-        return None
+        return self._resolve_tcc_with_context(
+            dt, self._prepare_nowcast_tcc_context(), datetime.now(timezone.utc)
+        )
 
     # ------------------------------------------------------------------
     # Hilfsmethoden

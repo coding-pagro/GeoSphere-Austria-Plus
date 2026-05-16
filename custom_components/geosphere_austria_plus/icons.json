@@ -1,0 +1,26 @@
+{
+  "entity": {
+    "sensor": {
+      "warning_level": {
+        "default": "mdi:alert-outline",
+        "state": {
+          "0": "mdi:alert-outline",
+          "1": "mdi:alert",
+          "2": "mdi:alert-circle",
+          "3": "mdi:alert-circle"
+        }
+      },
+      "aqi": {
+        "default": "mdi:leaf",
+        "state": {
+          "1": "mdi:leaf",
+          "2": "mdi:leaf",
+          "3": "mdi:alert-circle-outline",
+          "4": "mdi:alert-circle",
+          "5": "mdi:biohazard",
+          "6": "mdi:biohazard"
+        }
+      }
+    }
+  }
+}

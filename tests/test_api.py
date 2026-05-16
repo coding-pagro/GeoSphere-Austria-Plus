@@ -83,17 +83,43 @@ class TestParseStationGeoJSON:
         assert result["_lat"] == 48.21
         assert "_alt" not in result
 
-    def test_empty_param_data_returns_none(self):
+    def test_empty_param_data_skips_key(self):
+        """Station liefert den Parameter-Slot ohne Messwerte (z.B. TB1 an
+        Stationen ohne Bodensonde) → Key wird gar nicht gesetzt, damit der
+        Sensor 'unavailable' zeigt statt 'unknown'."""
         api = _make_api()
         data = {
             "features": [
                 {
                     "geometry": {"coordinates": [16.37, 48.21]},
-                    "properties": {"parameters": {"TL": {"data": []}}},
+                    "properties": {
+                        "parameters": {
+                            "TL": {"data": [12.0]},
+                            "TB1": {"data": []},  # no soil probe at this station
+                        }
+                    },
                 }
             ]
         }
         result = api._parse_station_geojson(data, "11035")
+        assert result["TL"] == 12.0
+        assert "TB1" not in result
+
+    def test_explicit_none_value_kept(self):
+        """values[-1] == None (transient measurement gap, array non-empty)
+        → Key is set with value None → Sensor shows 'unknown' rather than
+        flipping to 'unavailable'."""
+        api = _make_api()
+        data = {
+            "features": [
+                {
+                    "geometry": {"coordinates": [16.37, 48.21]},
+                    "properties": {"parameters": {"TL": {"data": [12.0, None]}}},
+                }
+            ]
+        }
+        result = api._parse_station_geojson(data, "11035")
+        assert "TL" in result
         assert result["TL"] is None
 
     def test_empty_features_raises(self):
@@ -202,6 +228,30 @@ class TestExtractMissingParams:
     def test_no_braces_returns_empty(self):
         from custom_components.geosphere_austria_plus.api import GeoSphereApi
         assert GeoSphereApi._extract_missing_params("some other error") == set()
+
+    def test_logs_warning_when_parameter_message_but_no_brace_set(self, caplog):
+        """API-Änderung erkennen: 'Parameter' im Detail aber kein {…}-Set."""
+        from custom_components.geosphere_austria_plus.api import GeoSphereApi
+        import logging
+        caplog.set_level(logging.WARNING, logger="custom_components.geosphere_austria_plus.api")
+        result = GeoSphereApi._extract_missing_params(
+            "Parameter SH is not available (new API error format!)"
+        )
+        assert result == set()
+        # Eine Warnung muss aufgetaucht sein, die den Detail-String enthält.
+        assert any(
+            "parameter" in r.message.lower() and "new api error format" in r.message.lower()
+            for r in caplog.records
+        )
+
+    def test_no_log_when_detail_is_unrelated(self, caplog):
+        """Allgemeine 400er ohne Parameter-Bezug dürfen NICHT als Regex-Bruch geloggt werden."""
+        from custom_components.geosphere_austria_plus.api import GeoSphereApi
+        import logging
+        caplog.set_level(logging.WARNING, logger="custom_components.geosphere_austria_plus.api")
+        result = GeoSphereApi._extract_missing_params("Invalid station id")
+        assert result == set()
+        assert caplog.records == []
 
 
 class TestGetCurrent:

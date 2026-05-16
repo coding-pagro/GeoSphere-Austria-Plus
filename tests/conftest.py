@@ -34,7 +34,10 @@ class _MockWeatherEntityFeature:
 
 
 class _MockWeatherEntity:
-    pass
+    @property
+    def supported_features(self):
+        """Mirror HA: derive from _attr_supported_features class/instance attribute."""
+        return getattr(self, "_attr_supported_features", 0)
 
 
 class _MockCoordinatorEntity:
@@ -78,7 +81,14 @@ class _MockDataUpdateCoordinator:
 
 
 class _MockUpdateFailed(Exception):
-    pass
+    """Mirror HA's UpdateFailed: accepts translation_domain/key/placeholders kwargs."""
+    def __init__(self, message: str = "", *, translation_domain: str | None = None,
+                 translation_key: str | None = None,
+                 translation_placeholders: dict | None = None) -> None:
+        super().__init__(message)
+        self.translation_domain = translation_domain
+        self.translation_key = translation_key
+        self.translation_placeholders = translation_placeholders or {}
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +226,11 @@ _config_entries_mod.callback = lambda f: f
 _ha_mod = types.ModuleType("homeassistant")
 _ha_mod.config_entries = _config_entries_mod
 
+_core_mod = MagicMock()
+# @callback ist in HA ein no-op-Decorator → durchreichen, sonst werden
+# dekorierte Funktionen durch MagicMocks ersetzt.
+_core_mod.callback = lambda f: f
+
 sys.modules.update(
     {
         "homeassistant": _ha_mod,
@@ -224,7 +239,7 @@ sys.modules.update(
         "homeassistant.components.weather": _weather_mod,
         "homeassistant.config_entries": _config_entries_mod,
         "homeassistant.const": _const_mod,
-        "homeassistant.core": MagicMock(),
+        "homeassistant.core": _core_mod,
         "homeassistant.helpers": MagicMock(),
         "homeassistant.helpers.aiohttp_client": MagicMock(),
         "homeassistant.helpers.device_registry": _device_registry_mod,

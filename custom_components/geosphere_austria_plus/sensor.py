@@ -16,6 +16,7 @@ from homeassistant.const import (
     CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     DEGREE,
     PERCENTAGE,
+    EntityCategory,
     UnitOfIrradiance,
     UnitOfLength,
     UnitOfPressure,
@@ -46,6 +47,11 @@ from .coordinator import (
     GeoSphereWarningsCoordinator,
     GeoSphereAirQualityCoordinator,
 )
+
+
+# Alle Daten werden zentral pro Coordinator abgerufen — Entities pollen nicht
+# selbst. Daher kein Limit auf parallele State-Updates nötig.
+PARALLEL_UPDATES = 0
 
 
 def _make_device_info(entry_id: str, location_name: str) -> DeviceInfo:
@@ -122,6 +128,9 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfPressure.HPA,
         device_class=SensorDeviceClass.PRESSURE,
         state_class=SensorStateClass.MEASUREMENT,
+        # Spezialwert (auf Meereshöhe reduziert) — User die das wollen,
+        # aktivieren ihn explizit. Vermeidet Doppelt-Pressure-Sensoren.
+        entity_registry_enabled_default=False,
     ),
     TawesSensorDescription(
         key="precipitation",      translation_key="precipitation",
@@ -136,6 +145,8 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTime.SECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
+        # Niche-Einheit (s/10min) — selten in Dashboards genutzt.
+        entity_registry_enabled_default=False,
     ),
     TawesSensorDescription(
         key="snow_height",        translation_key="snow_height",
@@ -143,6 +154,8 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfLength.CENTIMETERS,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:snowflake",
+        # Saisonaler Sensor — User in Bergregionen aktivieren ihn manuell.
+        entity_registry_enabled_default=False,
     ),
     TawesSensorDescription(
         key="global_radiation",   translation_key="global_radiation",
@@ -150,6 +163,8 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfIrradiance.WATTS_PER_SQUARE_METER,
         device_class=SensorDeviceClass.IRRADIANCE,
         state_class=SensorStateClass.MEASUREMENT,
+        # Spezialsensor (PV/Solar-Use-Case) — opt-in.
+        entity_registry_enabled_default=False,
     ),
     TawesSensorDescription(
         key="soil_temperature_10cm", translation_key="soil_temperature_10cm",
@@ -157,6 +172,7 @@ SENSORS: tuple[TawesSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
 
@@ -335,15 +351,6 @@ class GeoSphereWarningSensor(
         return max(w["level"] for w in warnings)
 
     @property
-    def icon(self) -> str:
-        level = self.native_value
-        if level == 0:
-            return "mdi:alert-outline"
-        if level == 1:
-            return "mdi:alert"
-        return "mdi:alert-circle"
-
-    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Alle aktiven Warnungen als strukturierte Attribute."""
         warnings = self.coordinator.data or []
@@ -379,18 +386,38 @@ class _AirQualityBase(
     _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
 
+    def __init__(self, coordinator: GeoSphereAirQualityCoordinator) -> None:
+        super().__init__(coordinator)
+        # Cache: (id(data), index). Wird invalidiert sobald coordinator.data
+        # ein neues Objekt referenziert (= neuer Update-Zyklus).
+        self._cached_idx: tuple[int, int] | None = None
+
     def _current_index(self) -> int:
-        """Index des ersten aktuellen/zukünftigen Vorhersagepunkts."""
-        timestamps: list[str] = (self.coordinator.data or {}).get("timestamps", [])
+        """Index des ersten aktuellen/zukünftigen Vorhersagepunkts.
+
+        Innerhalb eines Update-Zyklus wird das Ergebnis gecacht, weil
+        `native_value` und `extra_state_attributes` denselben Wert je
+        State-Update zweimal anfordern.
+        """
+        data = self.coordinator.data
+        data_id = id(data)
+        if self._cached_idx is not None and self._cached_idx[0] == data_id:
+            return self._cached_idx[1]
+
+        timestamps: list[str] = (data or {}).get("timestamps", [])
         now = datetime.now(timezone.utc)
+        idx = 0
         for i, ts_str in enumerate(timestamps):
             try:
                 dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             except ValueError:
                 continue
             if dt >= now - timedelta(hours=1):
-                return i
-        return 0
+                idx = i
+                break
+
+        self._cached_idx = (data_id, idx)
+        return idx
 
 
 class AirQualitySensor(_AirQualityBase):
@@ -464,17 +491,6 @@ class AirQualityIndexSensor(_AirQualityBase):
             if values and idx < len(values):
                 indices.append(_compute_aqi_level(values[idx], param))
         return max(indices) if indices else None
-
-    @property
-    def icon(self) -> str:
-        level = self.native_value or 1
-        if level <= 2:
-            return "mdi:leaf"
-        if level == 3:
-            return "mdi:alert-circle-outline"
-        if level == 4:
-            return "mdi:alert-circle"
-        return "mdi:biohazard"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

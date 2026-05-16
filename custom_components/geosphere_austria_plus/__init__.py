@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 
 from .const import (
     DOMAIN,
@@ -64,12 +65,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         station_id = entry.data.get(CONF_STATION_ID) or None
 
     # Vorhersagemodelle: Options → Data → Rückwärtskompatibilität (leere Liste = kein Forecast)
+    using_legacy_model_key = False
     if CONF_FORECAST_MODELS in entry.options:
         models: list[str] = entry.options[CONF_FORECAST_MODELS]
     elif CONF_FORECAST_MODELS in entry.data:
         models = entry.data[CONF_FORECAST_MODELS]
     else:
         models = [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
+        using_legacy_model_key = CONF_FORECAST_MODEL in entry.data
+
+    # Deprecation-Issue (sichtbar in HA Repairs) für veraltete forecast_model-Konfig.
+    # Issue wird beim nächsten Reload nach Migration automatisch wieder entfernt.
+    issue_id = f"deprecated_forecast_model_{entry.entry_id}"
+    if using_legacy_model_key:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="deprecated_forecast_model",
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
 
     # Optionale Features: Options haben Vorrang vor Data, Default = aktiviert
     enable_warnings: bool = entry.options.get(
@@ -143,29 +161,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 err,
             )
 
+    # Set für aktive Entity-Unique-IDs upfront initialisieren, damit Cleanup
+    # auch dann robust läuft, wenn eine Plattform mid-setup eine Exception wirft.
+    coordinators["_active_unique_ids"] = set()
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinators
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Veraltete Entities entfernen (z.B. nach Modell-Deaktivierung oder Station-Entfernung).
-    # Beide Plattformen befüllen _active_unique_ids immer (auch bei 0 Entities),
-    # sodass dieser Schlüssel nach async_forward_entry_setups immer vorhanden ist.
     # Bei 0 aktiven Entities wird der Set leer → alle veralteten Entities werden entfernt.
-    if "_active_unique_ids" in coordinators:
-        active_ids: set[str] = coordinators.pop("_active_unique_ids")
-        ent_reg = er.async_get(hass)
-        for reg_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-            if reg_entry.unique_id not in active_ids:
-                _LOGGER.debug("Veraltete Entity entfernen: %s", reg_entry.entity_id)
-                ent_reg.async_remove(reg_entry.entity_id)
+    active_ids: set[str] = coordinators.pop("_active_unique_ids")
+    ent_reg = er.async_get(hass)
+    for reg_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if reg_entry.unique_id not in active_ids:
+            _LOGGER.debug("Veraltete Entity entfernen: %s", reg_entry.entity_id)
+            ent_reg.async_remove(reg_entry.entity_id)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+def _iter_coordinators(coordinators: dict):
+    """Alle Coordinator-Instanzen aus dem coordinators-Dict liefern.
+
+    Liefert sowohl Top-Level-Coordinator-Werte als auch verschachtelte
+    Coordinatoren (z.B. coordinators[DATA_FORECASTS][model]).
+    """
+    for value in coordinators.values():
+        if hasattr(value, "_cancel_pending_retry"):
+            yield value
+        elif isinstance(value, dict):
+            for inner in value.values():
+                if hasattr(inner, "_cancel_pending_retry"):
+                    yield inner
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Eintrag entladen."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinators = hass.data[DOMAIN].pop(entry.entry_id, {})
+        # Geplante Retry-Timer/Tasks aller Coordinatoren abbrechen,
+        # damit kein Refresh auf einem zerstörten Coordinator läuft.
+        for coord in _iter_coordinators(coordinators):
+            coord._cancel_pending_retry()
     return unload_ok

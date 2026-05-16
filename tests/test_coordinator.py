@@ -32,6 +32,7 @@ def _make_coordinator(cls, **kwargs):
     coord._last_good_data = None
     coord._retry_step = 0
     coord._cancel_retry = None
+    coord._pending_retry_task = None
     coord._api = MagicMock()
     for k, v in kwargs.items():
         setattr(coord, k, v)
@@ -171,6 +172,86 @@ class TestRetryMechanism:
     async def test_fibonacci_sequence_matches_expected(self):
         """Vollständige Fibonacci-Sequenz: 1,2,3,5,8,13,21,30 Minuten."""
         assert _RETRY_INTERVALS == (1, 2, 3, 5, 8, 13, 21, 30)
+
+
+# ---------------------------------------------------------------------------
+# Retry-Lifecycle (H2): Task-Tracking und Cancel auf Shutdown
+# ---------------------------------------------------------------------------
+
+class TestRetryLifecycle:
+    @pytest.mark.asyncio
+    async def test_cancel_pending_retry_cancels_timer_and_task(self):
+        """_cancel_pending_retry bricht sowohl den Timer als auch einen
+        bereits gestarteten Refresh-Task ab."""
+        coord = _make_coordinator(GeoSphereCurrentCoordinator, station_id="11035")
+        timer_cancel = MagicMock()
+        task = MagicMock()
+        task.done.return_value = False
+        coord._cancel_retry = timer_cancel
+        coord._pending_retry_task = task
+
+        coord._cancel_pending_retry()
+
+        timer_cancel.assert_called_once()
+        task.cancel.assert_called_once()
+        assert coord._cancel_retry is None
+        assert coord._pending_retry_task is None
+
+    @pytest.mark.asyncio
+    async def test_cancel_pending_retry_skips_finished_task(self):
+        """Wenn der Refresh-Task bereits fertig ist, wird cancel() nicht gerufen."""
+        coord = _make_coordinator(GeoSphereCurrentCoordinator, station_id="11035")
+        task = MagicMock()
+        task.done.return_value = True
+        coord._pending_retry_task = task
+
+        coord._cancel_pending_retry()
+
+        task.cancel.assert_not_called()
+        assert coord._pending_retry_task is None
+
+    @pytest.mark.asyncio
+    async def test_retry_not_scheduled_during_ha_shutdown(self):
+        """Während HA-Shutdown (CoreState.stopping) darf kein neuer Retry
+        geplant werden — sonst läuft der Refresh auf einem zerstörten Coordinator."""
+        from homeassistant.core import CoreState
+        coord = _make_coordinator(GeoSphereCurrentCoordinator, station_id="11035")
+        coord._last_good_data = {"TL": 18.5}
+        coord.hass.state = CoreState.stopping
+        coord._api.get_current = AsyncMock(side_effect=GeoSphereApiError("timeout"))
+
+        result = await coord._async_update_data()
+
+        # Cache wird trotzdem zurückgegeben, aber kein Timer geplant.
+        assert result == {"TL": 18.5}
+        coord.hass.async_call_later.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retry_callback_tracks_created_task(self):
+        """Der Timer-Callback weist den erzeugten Refresh-Task an
+        _pending_retry_task zu, damit er später abgebrochen werden kann."""
+        coord = _make_coordinator(GeoSphereCurrentCoordinator, station_id="11035")
+        coord._last_good_data = {"TL": 18.5}
+        coord._api.get_current = AsyncMock(side_effect=GeoSphereApiError("timeout"))
+
+        fake_task = MagicMock()
+        coord.hass.async_create_task = MagicMock(return_value=fake_task)
+        # async_call_later soll den Callback nicht sofort feuern; wir simulieren
+        # das manuell unten.
+        captured_cb = {}
+        def _capture(delay, cb):
+            captured_cb["cb"] = cb
+            return MagicMock()
+        coord.hass.async_call_later.side_effect = _capture
+
+        await coord._async_update_data()
+
+        # Simuliere Timer-Firing:
+        captured_cb["cb"](None)
+
+        coord.hass.async_create_task.assert_called_once()
+        assert coord._pending_retry_task is fake_task
+        assert coord._cancel_retry is None  # Timer-Handle wurde geleert
 
 
 # ---------------------------------------------------------------------------

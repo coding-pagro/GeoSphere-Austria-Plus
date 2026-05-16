@@ -323,8 +323,90 @@ class TestConfigFlowUserStep:
     async def test_unique_id_based_on_coordinates(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
         await _call_user(fake, user_input=_BASE_USER_INPUT)
-        expected_uid = f"{round(_DEFAULT_LAT, 3)}_{round(_DEFAULT_LON, 3)}"
+        # 5 Dezimalen → ~1 m Auflösung; verhindert Kollisionen nahe gelegener Stationen.
+        expected_uid = f"{round(_DEFAULT_LAT, 5)}_{round(_DEFAULT_LON, 5)}"
         assert fake._last_unique_id == expected_uid
+
+    async def test_unique_id_distinguishes_nearby_coordinates(self):
+        """Zwei Installationen <100 m Abstand müssen unterschiedliche unique_ids haben."""
+        fake1 = _FakeConfigFlow(stations=[_VALID_STATION])
+        fake2 = _FakeConfigFlow(stations=[_VALID_STATION])
+        # ~80 m Abstand bei lat=48° (1 Dezimalstelle hinter dem dritten Komma)
+        await _call_user(fake1, user_input={**_BASE_USER_INPUT, CONF_LATITUDE: 48.21000, CONF_LONGITUDE: 16.37000})
+        await _call_user(fake2, user_input={**_BASE_USER_INPUT, CONF_LATITUDE: 48.21070, CONF_LONGITUDE: 16.37000})
+        assert fake1._last_unique_id != fake2._last_unique_id
+
+
+class _FakeReconfigureFlow(_FakeConfigFlow):
+    """Test-Double für die Reconfigure-Flow-Variante."""
+
+    def __init__(self, entry_data=None, entry_options=None, stations=None):
+        super().__init__(stations=stations)
+        self._entry = MagicMock()
+        self._entry.entry_id = "test_entry"
+        self._entry.title = "Wien"
+        self._entry.data = entry_data or {}
+        self._entry.options = entry_options or {}
+        self._mismatch_called = False
+        self._update_args = None
+
+    def _get_reconfigure_entry(self):
+        return self._entry
+
+    def _abort_if_unique_id_mismatch(self, reason="reconfigure_unique_id_mismatch"):
+        self._mismatch_called = True
+
+    def async_update_reload_and_abort(self, entry, data=None, title=None):
+        self._update_args = {"entry": entry, "data": data, "title": title}
+        return {"type": "abort", "reason": "reconfigure_successful"}
+
+    def _build_schema_with_defaults(self, entry):
+        return MagicMock()
+
+
+class TestReconfigureFlow:
+    """Gold-Tier: async_step_reconfigure ermöglicht User-Änderungen
+    am bestehenden Eintrag ohne Lösch-Re-Setup."""
+
+    async def test_shows_form_with_defaults_from_entry(self):
+        from custom_components.geosphere_austria_plus.config_flow import (
+            GeoSphereAustriaPlusConfigFlow,
+        )
+        fake = _FakeReconfigureFlow(
+            entry_data={**_BASE_USER_INPUT, CONF_LATITUDE: 47.5, CONF_LONGITUDE: 13.1},
+            stations=[_VALID_STATION],
+        )
+        result = await GeoSphereAustriaPlusConfigFlow.async_step_reconfigure(fake, None)
+        assert result["type"] == "form"
+        assert result["step_id"] == "reconfigure"
+
+    async def test_updates_entry_on_submit(self):
+        from custom_components.geosphere_austria_plus.config_flow import (
+            GeoSphereAustriaPlusConfigFlow,
+        )
+        fake = _FakeReconfigureFlow(
+            entry_data={**_BASE_USER_INPUT, CONF_LATITUDE: 47.5, CONF_LONGITUDE: 13.1},
+            stations=[_VALID_STATION],
+        )
+        new_input = {**_BASE_USER_INPUT, CONF_LATITUDE: 48.21, CONF_LONGITUDE: 16.37}
+        result = await GeoSphereAustriaPlusConfigFlow.async_step_reconfigure(fake, new_input)
+        assert result["type"] == "abort"
+        assert fake._update_args is not None
+        assert fake._update_args["data"][CONF_LATITUDE] == 48.21
+        assert fake._update_args["data"][CONF_LONGITUDE] == 16.37
+
+    async def test_unique_id_mismatch_check_called_on_submit(self):
+        """Bei Reconfigure muss die unique_id-Kollision mit ANDEREN Einträgen
+        geprüft werden (nicht abort_if_unique_id_configured wie bei user-step)."""
+        from custom_components.geosphere_austria_plus.config_flow import (
+            GeoSphereAustriaPlusConfigFlow,
+        )
+        fake = _FakeReconfigureFlow(
+            entry_data=_BASE_USER_INPUT,
+            stations=[_VALID_STATION],
+        )
+        await GeoSphereAustriaPlusConfigFlow.async_step_reconfigure(fake, _BASE_USER_INPUT)
+        assert fake._mismatch_called is True
 
     async def test_invalid_models_are_filtered_out(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
