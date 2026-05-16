@@ -68,5 +68,18 @@
     "abort": {
       "already_configured": "A location with these coordinates is already configured."
     }
+  },
+  "issues": {
+    "deprecated_forecast_model": {
+      "title": "Legacy single-model configuration",
+      "description": "This config entry still uses the deprecated `forecast_model` key (single model). Open the integration's options and re-save once to migrate to the new multi-model `forecast_models` list. Backwards compatibility will be removed in a future release."
+    }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_datahub": "Reach GeoSphere DataHub API",
+      "can_reach_warnings": "Reach weather warnings API",
+      "can_reach_open_meteo": "Reach Open-Meteo API"
+    }
   }
 }

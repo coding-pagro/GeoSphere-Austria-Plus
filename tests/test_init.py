@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.geosphere_austria_plus.const import (
+    CONF_FORECAST_MODEL,
     CONF_FORECAST_MODELS,
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
@@ -453,6 +454,54 @@ class TestAsyncUnloadEntry:
 
         top_coord._cancel_pending_retry.assert_called_once()
         nested_coord._cancel_pending_retry.assert_called_once()
+
+
+class TestDeprecationIssue:
+    async def test_legacy_forecast_model_creates_issue(self):
+        """Eintrag mit altem forecast_model-Schlüssel → Repair-Issue wird angelegt."""
+        entry = _make_entry(data={
+            CONF_LATITUDE: 48.21,
+            CONF_LONGITUDE: 16.37,
+            CONF_FORECAST_MODEL: "nwp-v1-1h-2500m",  # legacy key, no forecast_models
+        })
+        hass = _make_hass()
+
+        with (
+            patch(f"{_PATCH_BASE}.GeoSphereForecastCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereWarningsCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereAirQualityCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+            patch(f"{_PATCH_BASE}.ir") as mock_ir,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+        mock_ir.async_create_issue.assert_called_once()
+        # Issue-ID enthält die entry_id für Uniqueness
+        call = mock_ir.async_create_issue.call_args
+        assert call.args[1] == DOMAIN
+        assert "deprecated_forecast_model" in call.args[2]
+        assert entry.entry_id in call.args[2]
+
+    async def test_new_forecast_models_deletes_legacy_issue(self):
+        """Eintrag mit neuem forecast_models-Schlüssel → eventuelles Altissue löschen."""
+        entry = _make_entry(data=_BASE_DATA)  # _BASE_DATA enthält CONF_FORECAST_MODELS
+        hass = _make_hass()
+
+        with (
+            patch(f"{_PATCH_BASE}.GeoSphereForecastCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereWarningsCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.GeoSphereAirQualityCoordinator", return_value=_make_coordinator_mock()),
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+            patch(f"{_PATCH_BASE}.ir") as mock_ir,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+        mock_ir.async_create_issue.assert_not_called()
+        mock_ir.async_delete_issue.assert_called_once()
 
 
 class TestActiveUniqueIdsCleanup:

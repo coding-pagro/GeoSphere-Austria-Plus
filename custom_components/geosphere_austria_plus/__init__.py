@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 
 from .const import (
     DOMAIN,
@@ -64,12 +65,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         station_id = entry.data.get(CONF_STATION_ID) or None
 
     # Vorhersagemodelle: Options → Data → Rückwärtskompatibilität (leere Liste = kein Forecast)
+    using_legacy_model_key = False
     if CONF_FORECAST_MODELS in entry.options:
         models: list[str] = entry.options[CONF_FORECAST_MODELS]
     elif CONF_FORECAST_MODELS in entry.data:
         models = entry.data[CONF_FORECAST_MODELS]
     else:
         models = [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
+        using_legacy_model_key = CONF_FORECAST_MODEL in entry.data
+
+    # Deprecation-Issue (sichtbar in HA Repairs) für veraltete forecast_model-Konfig.
+    # Issue wird beim nächsten Reload nach Migration automatisch wieder entfernt.
+    issue_id = f"deprecated_forecast_model_{entry.entry_id}"
+    if using_legacy_model_key:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="deprecated_forecast_model",
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
 
     # Optionale Features: Options haben Vorrang vor Data, Default = aktiviert
     enable_warnings: bool = entry.options.get(

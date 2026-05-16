@@ -68,5 +68,18 @@
     "abort": {
       "already_configured": "Ein Standort mit diesen Koordinaten ist bereits eingerichtet."
     }
+  },
+  "issues": {
+    "deprecated_forecast_model": {
+      "title": "Veraltete Einzel-Modell-Konfiguration",
+      "description": "Dieser Eintrag nutzt noch den veralteten `forecast_model`-Schlüssel (Einzelmodell). Öffne die Integrations-Optionen und speichere einmal neu, um auf die neue Mehrmodell-Liste `forecast_models` zu migrieren. Die Rückwärtskompatibilität wird in einer zukünftigen Version entfernt."
+    }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_datahub": "GeoSphere DataHub API erreichbar",
+      "can_reach_warnings": "Warnungs-API erreichbar",
+      "can_reach_open_meteo": "Open-Meteo-API erreichbar"
+    }
   }
 }
