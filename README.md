@@ -170,6 +170,102 @@ Zusätzlich planen die Coordinatoren bei einem Fehler beschleunigte Wiederholver
 
 ---
 
+## Data Updates
+
+Die Integration ist ein reines **Cloud-Polling**-Modul — sie hält keine offene Verbindung, sondern fragt die GeoSphere-Endpunkte in festen Intervallen ab:
+
+| Datenquelle | Intervall | Wann sinnvoll |
+|---|---|---|
+| TAWES (aktuelle Messwerte) | **10 Minuten** | Stationsdaten ändern sich nicht häufiger |
+| NWP/Ensemble/Nowcast (Vorhersage) | **60 Minuten** | Modellläufe werden stündlich aktualisiert |
+| Wetterwarnungen | **15 Minuten** | Reaktiver Push für neue Warnungen ist nicht verfügbar |
+| Luftqualität (chem-v2-1h-3km) | **60 Minuten** | Modell publiziert stündlich |
+| Open-Meteo (optional) | **60 Minuten** | Tagesverlängerung |
+
+Bei API-Fehlern liefern alle Koordinatoren die letzten erfolgreichen Daten weiter und versuchen einen beschleunigten Refresh mit Fibonacci-Backoff (siehe [Robustheit](#robustheit-gegen-api-ausfälle)).
+
+---
+
+## Anwendungsfälle
+
+Die Integration wird typischerweise eingesetzt für:
+
+1. **Lokale Wetteranzeige am Smart-Display** (Lovelace `weather-forecast`-Karte mit stündlicher Vorhersage).
+2. **Unwetter-Alerts via Notification**: Automation, die bei `sensor.geosphere_warning_level >= 2` (orange/rot) eine Push-Nachricht versendet.
+3. **PV-Steuerung mit Globalstrahlung** (`sensor.geosphere_global_radiation`) und CAPE (`state_attr('weather.geosphere', 'cape')`) — z. B. Wechselrichter-Standby vor Gewittern.
+4. **Schneefall-Trigger im Bergland**: `forecast.snow_altitude < ele_haus` aktiviert Schneeräum-Reminder.
+5. **Luftqualitäts-Display** im Dashboard mit AQI-Sensor + Pollen-Sensoren aus anderen Integrationen.
+
+### Beispiel-Automation: Gewitter-Voralarm
+
+```yaml
+automation:
+  - alias: Gewitter-Vorwarnung
+    trigger:
+      - platform: numeric_state
+        entity_id: weather.geosphere_nwp
+        attribute: cape
+        above: 1500
+    action:
+      - service: notify.mobile_app
+        data:
+          title: "Gewitter möglich"
+          message: "CAPE > 1500 J/kg in der Vorhersage."
+```
+
+### Beispiel-Automation: Reaktion auf rote Warnung
+
+```yaml
+automation:
+  - alias: Rote-Warnung-Push
+    trigger:
+      - platform: state
+        entity_id: sensor.geosphere_warning_level
+        to: "3"
+    action:
+      - service: notify.alle_geraete
+        data:
+          title: "{{ trigger.to_state.attributes.warnings[0].type }}"
+          message: "{{ trigger.to_state.attributes.warnings[0].text }}"
+```
+
+---
+
+## Bekannte Einschränkungen
+
+- **Geographischer Geltungsbereich:** GeoSphere DataHub liefert nur Daten für **Österreich**. Außerhalb des österreichischen Bundesgebiets sind die Vorhersagen ungenau oder leer.
+- **Nowcast hat kein Daily-Forecast:** Das Nowcast-Modell liefert nur 2–3 h Voraus — die Entität exponiert daher nur die stündliche Vorhersage, kein `forecast.daily`.
+- **Ensemble bietet keine relative Feuchte:** `rh2m` fehlt in den Ensemble-Parametern → die Wetterentität liefert in dem Modell kein `humidity`-Feld in der Vorhersage.
+- **API-Rate-Limits unbekannt:** GeoSphere veröffentlicht keine harten Rate-Limits. Die Polling-Intervalle sind konservativ gewählt; bei produktivem Einsatz keine Reduzierung empfohlen.
+- **Warnungs-API ist deutsch-only:** Die Warntexte aus `warnungen.zamg.at` sind ausschließlich deutsch.
+
+---
+
+## Troubleshooting
+
+| Symptom | Ursache | Lösung |
+|---|---|---|
+| Sensoren bleiben auf "Nicht verfügbar" | API hat noch keinen erfolgreichen Refresh geschafft | Im Log nach `geosphere_austria_plus` filtern; Fibonacci-Retry läuft automatisch (max. 30 min) |
+| Wetter-Entität fehlt | 0 Modelle in Konfiguration ausgewählt | In Optionen mindestens ein Forecast-Modell wählen |
+| TAWES-Sensoren fehlen | Keine TAWES-Station konfiguriert | In Optionen Station auswählen |
+| Forecast hat keine Daten | API-Modell antwortet zu langsam beim ersten Setup | Integration neu laden — `ConfigEntryNotReady` triggert automatischen Retry |
+| "Pressure (Reduced)" / "Global Radiation" / "Snow Height" / "Sunshine Duration" fehlen | Standardmäßig deaktiviert seit v2.10 | Im Entity-Register aktivieren (Einstellungen → Geräte & Dienste → Entität → Aktivieren) |
+| Repair-Hinweis "Veraltete Einzel-Modell-Konfiguration" | Eintrag stammt aus älterer Plugin-Version | In den Optionen einmal speichern → migriert automatisch |
+
+Für tiefergehende Analyse: **Einstellungen → Geräte & Dienste → GeoSphere Austria Plus → Diagnose herunterladen** liefert ein JSON mit Coordinator-Status, Retry-Counter und Endpunkt-Erreichbarkeit (ohne präzise Koordinaten).
+
+---
+
+## Entfernen
+
+1. **Einstellungen → Geräte & Dienste → GeoSphere Austria Plus → Löschen**
+2. HACS → Integrationen → GeoSphere Austria Plus → "Deinstallieren"
+3. Home Assistant neu starten
+
+Beim Löschen des Config-Entry werden alle zugehörigen Entities, das Gerät und gecachte Daten automatisch entfernt.
+
+---
+
 ## Lizenz
 
 Die GeoSphere Austria API-Daten stehen unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
