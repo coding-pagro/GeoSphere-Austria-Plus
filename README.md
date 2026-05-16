@@ -19,9 +19,10 @@ Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (C
 | **13 TAWES-Sensoren** (Temperatur, Feuchte, Druck, Wind, Strahlung, Bodentemperatur, …) | ✅ |
 | **Wetterbedingungen (condition)** inkl. Gewitter-Erkennung über GeoSphere-Symbolcode | ✅ |
 | **Stündliche Vorhersage (hourly forecast, 48 h)** mit Solarstrahlung, Schneefallgrenze, CAPE, Böen | ✅ |
-| **Tägliche Vorhersage (daily forecast, 7 Tage)** mit modell-eigenen Tagesextremen | ✅ |
+| **Tägliche Vorhersage** (2–3 Tage GeoSphere, optional 3–14 Tage via Open-Meteo-Verlängerung) | ✅ |
 | **Wetterwarnungen (Unwetterwarnungen)** | ✅ |
 | **Luftqualitätsindex (NO₂, O₃, PM10, PM2.5 + AQI)** | ✅ |
+| **UV-Index (Open-Meteo-Tagesverlängerung)** als Forecast-Attribut | ✅ |
 | 0–3 Vorhersagemodelle pro Station wählbar | ✅ |
 | **Robust gegen API-Ausfälle** (Last-known-good-Cache + Fibonacci-Backoff-Retry) | ✅ |
 | Keine API-Key erforderlich | ✅ |
@@ -104,6 +105,8 @@ Es können auch **0 Modelle** gewählt werden – in diesem Fall wird keine Wett
 | Vorhersagemodelle | 0–3 Modelle (NWP, Ensemble, Nowcast) | NWP (Standard) |
 | Wetterwarnungen | Warnungs-Sensor aktivieren | ✅ (Standard) |
 | Luftqualität | Luftqualitäts-Sensoren aktivieren | ✅ (Standard) |
+| Open-Meteo-Verlängerung | Tagesvorhersage über GeoSphere hinaus verlängern | ❌ (opt-in) |
+| Tage Open-Meteo | Anzahl Tage im Daily-Forecast (3–14) | 7 |
 
 Pro Standort wird **ein Gerät** angelegt. Jedes gewählte Vorhersagemodell erscheint als eigene Wetterentität darunter; die TAWES-Sensoren (sofern Station gewählt), der Warnungs-Sensor und die Luftqualitäts-Sensoren werden einmalig pro Gerät angelegt.
 
@@ -151,7 +154,7 @@ Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32
 
 ## Vorhersage
 
-Die GeoSphere-Modelle **NWP** und **Ensemble** liefern stündliche Daten für rund 60 Stunden; daraus entstehen 2–3 Tagesvorhersagen. Optional kann in den Einstellungen **Open-Meteo** aktiviert werden – das verlängert die tägliche Vorhersage auf bis zu 14 Tage. Die ersten Tage stammen dabei weiterhin von GeoSphere; Open-Meteo füllt ausschließlich den Bereich, den GeoSphere nicht mehr abdeckt.
+Die GeoSphere-Modelle **NWP** und **Ensemble** liefern stündliche Daten für rund 60 Stunden; die Integration exponiert daraus die nächsten **48 Stunden** als `hourly`-Forecast und 2–3 Tage als `daily`-Forecast. Optional kann in den Einstellungen **Open-Meteo** aktiviert werden — das verlängert den Daily-Forecast auf **3 bis 14 Tage** (konfigurierbar, Default 7). Die ersten Tage stammen dabei weiterhin von GeoSphere; Open-Meteo füllt ausschließlich den Bereich, den GeoSphere nicht mehr abdeckt.
 
 ### Attribute
 
@@ -162,9 +165,11 @@ Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Lu
 | `solar_irradiance` | W/m² | NWP `grad`, Ensemble `grad_p50` | ✅ je Stunde | — |
 | `snow_altitude` | m | NWP `snowlmt`, Ensemble `snowlmt_p50` | ✅ je Stunde | ✅ Tagesminimum |
 | `cape` | m²/s² | NWP `cape`, Ensemble `cape_p50` | ✅ je Stunde | ✅ Tagesmaximum |
+| `uv_index` | dimensionslos (WMO 0–11+) | Open-Meteo `uv_index_max` | — | ✅ Tagesmaximum (nur bei aktivierter Open-Meteo-Verlängerung) |
 
 - **`snow_altitude`** ist die Schneefallgrenze in Metern – hochrelevant im Bergland. Im Tagesforecast wird das Tagesminimum geliefert (= tiefstes Niveau, auf das Schneefall reicht).
 - **`cape`** quantifiziert das Gewitterpotenzial. Werte >1000 J/kg deuten auf Gewitter hin, >2500 auf schwere Gewitter. Im Tagesforecast wird das Tagesmaximum geliefert.
+- **`uv_index`** ist das WMO-UV-Tagesmaximum. Wird nur befüllt, wenn die Open-Meteo-Verlängerung aktiviert ist, und nur für die Tage, die Open-Meteo abdeckt (d. h. nach Ablauf der GeoSphere-Daten). Zusätzlich werden für diese Tage die HA-Standardfelder `apparent_temperature`, `dew_point`, `cloud_coverage`, `pressure`, `precipitation_probability` aus Open-Meteo befüllt.
 
 ---
 
@@ -274,6 +279,8 @@ Beim Löschen des Config-Entry werden alle zugehörigen Entities, das Gerät und
 
 ## Lizenz
 
-Die GeoSphere Austria API-Daten stehen unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+Die GeoSphere Austria API-Daten stehen unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — © [GeoSphere Austria](https://www.geosphere.at/).
+
+Die optionale Tagesverlängerung nutzt Daten von [Open-Meteo](https://open-meteo.com), ebenfalls unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) lizenziert. Attribution-String der Integration: *„Daily forecast extension by Open-Meteo (CC-BY 4.0)"*.
 
 Der Code dieser Integration steht unter der MIT-Lizenz.
