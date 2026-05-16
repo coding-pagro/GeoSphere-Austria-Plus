@@ -4,7 +4,7 @@
 [![Validate](https://github.com/coding-pagro/GeoSphere-Austria-Plus/actions/workflows/validate.yml/badge.svg)](https://github.com/coding-pagro/GeoSphere-Austria-Plus/actions/workflows/validate.yml)
 [![codecov](https://codecov.io/gh/coding-pagro/GeoSphere-Austria-Plus/branch/main/graph/badge.svg)](https://codecov.io/gh/coding-pagro/GeoSphere-Austria-Plus)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
-[![Quality Scale](https://img.shields.io/badge/quality_scale-gold-gold.svg)](https://developers.home-assistant.io/docs/core/integration-quality-scale/)
+[![Quality Scale](https://img.shields.io/badge/quality_scale-platinum-e5e4e2.svg)](https://developers.home-assistant.io/docs/core/integration-quality-scale/)
 
 Custom Integration für Home Assistant mit vollständiger **Wetterbedingungen (Conditions)** und **Vorhersage (Forecast)** Unterstützung – basierend auf dem öffentlichen [GeoSphere Austria DataHub API](https://dataset.api.hub.geosphere.at/).
 

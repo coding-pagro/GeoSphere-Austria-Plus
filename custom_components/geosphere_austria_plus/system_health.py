@@ -5,6 +5,8 @@ Backend-Endpunkte (GeoSphere DataHub, Warnungs-API, Open-Meteo).
 """
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components import system_health
 from homeassistant.core import HomeAssistant, callback
 
@@ -19,7 +21,7 @@ def async_register(
     register.async_register_info(system_health_info)
 
 
-async def system_health_info(hass: HomeAssistant) -> dict:
+async def system_health_info(hass: HomeAssistant) -> dict[str, Any]:
     """Endpunkt-Erreichbarkeit für die System-Health-Karte."""
     return {
         "can_reach_datahub": system_health.async_check_can_reach_url(hass, API_BASE),

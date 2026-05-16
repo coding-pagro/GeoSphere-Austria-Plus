@@ -1,0 +1,27 @@
+# Project-level tool configuration. The integration itself is loaded by
+# Home Assistant via the custom_components/ convention and does not need
+# a build backend — this file exists only to hold mypy settings.
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+warn_return_any = true
+warn_unused_ignores = true
+implicit_reexport = false
+disallow_untyped_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+show_error_codes = true
+
+# Some Home Assistant submodules and voluptuous lack complete type stubs.
+# We don't want those to drown out our own typing signal.
+[[tool.mypy.overrides]]
+module = ["voluptuous", "voluptuous.*"]
+ignore_missing_imports = true
+
+# Only the integration source is strict-checked; the test suite uses
+# heavy MagicMock patching that fights mypy more than it helps.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+ignore_errors = true

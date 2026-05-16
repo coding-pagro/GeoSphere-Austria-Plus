@@ -6,11 +6,14 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -44,10 +47,10 @@ _LOGGER = logging.getLogger(__name__)
 _NO_STATION = ""
 
 
-def _station_options(stations: list[dict]) -> list[dict]:
+def _station_options(stations: list[dict[str, Any]]) -> list[SelectOptionDict]:
     """Stations-Dropdown-Optionen inkl. Leer-Eintrag aufbauen."""
-    return [{"value": _NO_STATION, "label": "— keine Station —"}] + [
-        {"value": s["id"], "label": f"{s['name']} ({s['id']})"}
+    return [SelectOptionDict(value=_NO_STATION, label="— keine Station —")] + [
+        SelectOptionDict(value=s["id"], label=f"{s['name']} ({s['id']})")
         for s in sorted(stations, key=lambda x: x["name"])
     ]
 
@@ -84,9 +87,9 @@ def _parse_user_input(user_input: dict[str, Any], default_name: str) -> dict[str
 class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
     """Einstellungen nach der Ersteinrichtung ändern."""
 
-    _stations: list[dict] | None = None
+    _stations: list[dict[str, Any]] | None = None
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if self._stations is None:
             api = GeoSphereApi(async_get_clientsession(self.hass))
             try:
@@ -205,16 +208,16 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
                 TextSelectorConfig(type=TextSelectorType.TEXT)
             ),
             vol.Required(CONF_LATITUDE, default=lat): NumberSelector(
-                NumberSelectorConfig(min=-90, max=90, step=0.001, mode="box")
+                NumberSelectorConfig(min=-90, max=90, step=0.001, mode=NumberSelectorMode.BOX)
             ),
             vol.Required(CONF_LONGITUDE, default=lon): NumberSelector(
-                NumberSelectorConfig(min=-180, max=180, step=0.001, mode="box")
+                NumberSelectorConfig(min=-180, max=180, step=0.001, mode=NumberSelectorMode.BOX)
             ),
             vol.Optional(CONF_STATION_ID, default=station): station_field,
             vol.Optional(CONF_FORECAST_MODELS, default=models): SelectSelector(
                 SelectSelectorConfig(
                     options=[
-                        {"value": k, "label": FORECAST_MODEL_LABELS[k]}
+                        SelectOptionDict(value=k, label=FORECAST_MODEL_LABELS[k])
                         for k in FORECAST_MODELS
                     ],
                     multiple=True,
@@ -231,7 +234,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
                     min=OPEN_METEO_FORECAST_DAYS_MIN,
                     max=OPEN_METEO_FORECAST_DAYS_MAX,
                     step=1,
-                    mode="slider",
+                    mode=NumberSelectorMode.SLIDER,
                 )
             ),
         })
@@ -241,7 +244,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config Flow Handler."""
 
     VERSION = 1
-    _stations: list[dict] | None = None
+    _stations: list[dict[str, Any]] | None = None
 
     @staticmethod
     def async_get_options_flow(
@@ -249,7 +252,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> GeoSphereOptionsFlowHandler:
         return GeoSphereOptionsFlowHandler()
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if self._stations is None:
             api = GeoSphereApi(async_get_clientsession(self.hass))
             try:
@@ -272,7 +275,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    ) -> ConfigFlowResult:
         """Bestehenden Eintrag rekonfigurieren (Gold-Quality-Scale Anforderung).
 
         Ermöglicht User-Änderungen an Standort, Station und Forecast-Modellen
@@ -369,16 +372,16 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 TextSelectorConfig(type=TextSelectorType.TEXT)
             ),
             vol.Required(CONF_LATITUDE, default=lat): NumberSelector(
-                NumberSelectorConfig(min=-90, max=90, step=0.001, mode="box")
+                NumberSelectorConfig(min=-90, max=90, step=0.001, mode=NumberSelectorMode.BOX)
             ),
             vol.Required(CONF_LONGITUDE, default=lon): NumberSelector(
-                NumberSelectorConfig(min=-180, max=180, step=0.001, mode="box")
+                NumberSelectorConfig(min=-180, max=180, step=0.001, mode=NumberSelectorMode.BOX)
             ),
             vol.Optional(CONF_STATION_ID, default=station): station_field,
             vol.Optional(CONF_FORECAST_MODELS, default=models): SelectSelector(
                 SelectSelectorConfig(
                     options=[
-                        {"value": k, "label": FORECAST_MODEL_LABELS[k]}
+                        SelectOptionDict(value=k, label=FORECAST_MODEL_LABELS[k])
                         for k in FORECAST_MODELS
                     ],
                     multiple=True,
@@ -395,7 +398,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=OPEN_METEO_FORECAST_DAYS_MIN,
                     max=OPEN_METEO_FORECAST_DAYS_MAX,
                     step=1,
-                    mode="slider",
+                    mode=NumberSelectorMode.SLIDER,
                 )
             ),
         })

@@ -85,13 +85,7 @@ rules:
       Statisches 1-Gerät-pro-Entry-Modell. Geräte-Cleanup wird bei
       Entry-Removal von HA selbst übernommen.
 
-  # ─── Platinum (nicht angestrebt) ───────────────────────────────────
-  async-dependency:
-    status: exempt
-    comment: Out of scope für diese Iteration.
-  inject-websession:
-    status: exempt
-    comment: Out of scope für diese Iteration.
-  strict-typing:
-    status: exempt
-    comment: Out of scope für diese Iteration.
+  # ─── Platinum ──────────────────────────────────────────────────────
+  async-dependency: done
+  inject-websession: done
+  strict-typing: done

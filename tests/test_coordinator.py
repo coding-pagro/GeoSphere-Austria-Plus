@@ -260,6 +260,14 @@ class TestRetryLifecycle:
 
 class TestForecastCoordinatorFallback:
     @pytest.mark.asyncio
+    async def test_returns_fresh_data_on_success(self):
+        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v1-1h-2500m")
+        fresh = [{"t2m": 15.0}]
+        coord._api.get_forecast = AsyncMock(return_value=fresh)
+        assert await coord._async_update_data() == fresh
+        assert coord._last_good_data == fresh
+
+    @pytest.mark.asyncio
     async def test_returns_cached_data_on_api_error(self):
         coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v1-1h-2500m")
         cached = [{"t2m": 15.0}]
@@ -289,6 +297,14 @@ class TestForecastCoordinatorFallback:
 
 class TestWarningsCoordinatorFallback:
     @pytest.mark.asyncio
+    async def test_returns_fresh_data_on_success(self):
+        coord = _make_coordinator(GeoSphereWarningsCoordinator, lat=48.2, lon=16.37)
+        fresh = [{"warnstufeid": 1}]
+        coord._api.get_warnings = AsyncMock(return_value=fresh)
+        assert await coord._async_update_data() == fresh
+        assert coord._last_good_data == fresh
+
+    @pytest.mark.asyncio
     async def test_returns_cached_data_on_api_error(self):
         coord = _make_coordinator(GeoSphereWarningsCoordinator, lat=48.2, lon=16.37)
         cached = [{"warnstufeid": 2}]
@@ -307,6 +323,14 @@ class TestWarningsCoordinatorFallback:
 
 
 class TestAirQualityCoordinatorFallback:
+    @pytest.mark.asyncio
+    async def test_returns_fresh_data_on_success(self):
+        coord = _make_coordinator(GeoSphereAirQualityCoordinator, lat=48.2, lon=16.37)
+        fresh = {"no2surf": 20.0}
+        coord._api.get_air_quality = AsyncMock(return_value=fresh)
+        assert await coord._async_update_data() == fresh
+        assert coord._last_good_data == fresh
+
     @pytest.mark.asyncio
     async def test_returns_cached_data_on_api_error(self):
         coord = _make_coordinator(GeoSphereAirQualityCoordinator, lat=48.2, lon=16.37)
@@ -332,6 +356,22 @@ class TestAirQualityCoordinatorFallback:
 class TestOpenMeteoCoordinatorErrorPaths:
     """Open-Meteo catches aiohttp.ClientError / ValueError / KeyError — not the
     GeoSphere-specific GeoSphereApiError. Pin those branches explicitly."""
+
+    @pytest.mark.asyncio
+    async def test_returns_fresh_data_on_success(self):
+        from custom_components.geosphere_austria_plus.coordinator import (
+            GeoSphereOpenMeteoDailyCoordinator,
+        )
+        coord = _make_coordinator(GeoSphereOpenMeteoDailyCoordinator, lat=48.2, lon=16.37)
+        coord._session = MagicMock()
+        fresh = [{"datetime": "2026-05-17T00:00:00+00:00"}]
+        with patch(
+            "custom_components.geosphere_austria_plus.coordinator.fetch_open_meteo_daily",
+            return_value=fresh,
+        ):
+            result = await coord._async_update_data()
+        assert result == fresh
+        assert coord._last_good_data == fresh
 
     @pytest.mark.asyncio
     async def test_client_error_returns_cached_data(self):

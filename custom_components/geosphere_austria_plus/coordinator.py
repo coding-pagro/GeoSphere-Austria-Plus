@@ -4,11 +4,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import GeoSphereApi, GeoSphereApiError
@@ -38,10 +39,20 @@ class _RetryMixin:
         self.hass             – gesetzt durch DataUpdateCoordinator.__init__
     """
 
+    # Type-only stubs for attributes / methods provided by DataUpdateCoordinator
+    # at runtime — declared here so mypy --strict knows about them without
+    # adding a Protocol or making the mixin abstract.
+    hass: HomeAssistant
+    _last_good_data: Any
+
+    async def async_refresh(self) -> None:  # noqa: D401 — provided by DataUpdateCoordinator
+        """Provided by DataUpdateCoordinator at runtime."""
+        ...
+
     def _retry_init(self) -> None:
         self._retry_step: int = 0
         self._cancel_retry: Any = None
-        self._pending_retry_task: asyncio.Task | None = None
+        self._pending_retry_task: asyncio.Task[Any] | None = None
 
     def _cancel_pending_retry(self) -> None:
         """Geplanten Retry-Timer **und** bereits gestarteten Refresh-Task abbrechen.
@@ -90,7 +101,7 @@ class _RetryMixin:
             self._cancel_retry = None
             self._pending_retry_task = self.hass.async_create_task(self.async_refresh())
 
-        self._cancel_retry = self.hass.async_call_later(delay * 60, _trigger_retry)
+        self._cancel_retry = async_call_later(self.hass, delay * 60, _trigger_retry)
         return self._last_good_data
 
 
@@ -111,11 +122,13 @@ class GeoSphereCurrentCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str, A
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            return self._retry_on_success(await self._api.get_current(self.station_id))
+            data = await self._api.get_current(self.station_id)
+            self._retry_on_success(data)
+            return data
         except GeoSphereApiError as err:
             cached = self._retry_on_failure("GeoSphere TAWES", err)
             if cached is not None:
-                return cached
+                return cast("dict[str, Any]", cached)
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="tawes_api_error",
@@ -148,13 +161,13 @@ class GeoSphereForecastCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[
 
     async def _async_update_data(self) -> list[dict[str, Any]]:
         try:
-            return self._retry_on_success(
-                await self._api.get_forecast(self.lat, self.lon, self.model)
-            )
+            data = await self._api.get_forecast(self.lat, self.lon, self.model)
+            self._retry_on_success(data)
+            return data
         except GeoSphereApiError as err:
             cached = self._retry_on_failure(f"GeoSphere Vorhersage ({self.model})", err)
             if cached is not None:
-                return cached
+                return cast("list[dict[str, Any]]", cached)
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="forecast_api_error",
@@ -180,13 +193,13 @@ class GeoSphereWarningsCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[
 
     async def _async_update_data(self) -> list[dict[str, Any]]:
         try:
-            return self._retry_on_success(
-                await self._api.get_warnings(self.lat, self.lon)
-            )
+            data = await self._api.get_warnings(self.lat, self.lon)
+            self._retry_on_success(data)
+            return data
         except GeoSphereApiError as err:
             cached = self._retry_on_failure("Warnungs-API", err)
             if cached is not None:
-                return cached
+                return cast("list[dict[str, Any]]", cached)
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="warnings_api_error",
@@ -212,13 +225,13 @@ class GeoSphereAirQualityCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            return self._retry_on_success(
-                await self._api.get_air_quality(self.lat, self.lon)
-            )
+            data = await self._api.get_air_quality(self.lat, self.lon)
+            self._retry_on_success(data)
+            return data
         except GeoSphereApiError as err:
             cached = self._retry_on_failure("Luftqualitäts-API", err)
             if cached is not None:
-                return cached
+                return cast("dict[str, Any]", cached)
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="air_quality_api_error",
@@ -244,13 +257,13 @@ class GeoSphereOpenMeteoDailyCoordinator(_RetryMixin, DataUpdateCoordinator[list
 
     async def _async_update_data(self) -> list[dict[str, Any]]:
         try:
-            return self._retry_on_success(
-                await fetch_open_meteo_daily(self._session, self.lat, self.lon)
-            )
+            data = await fetch_open_meteo_daily(self._session, self.lat, self.lon)
+            self._retry_on_success(data)
+            return data
         except (aiohttp.ClientError, ValueError, KeyError) as err:
             cached = self._retry_on_failure("Open-Meteo", err)
             if cached is not None:
-                return cached
+                return cast("list[dict[str, Any]]", cached)
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="open_meteo_api_error",

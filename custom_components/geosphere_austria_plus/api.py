@@ -109,7 +109,7 @@ class GeoSphereApi:
         raise GeoSphereApiError(f"Fehler beim Abrufen aktueller Daten für Station {station_id}")
 
     @staticmethod
-    def _normalize_ensemble_params(entries: list[dict]) -> list[dict]:
+    def _normalize_ensemble_params(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Benennt Ensemble-Parameternamen in NWP-Parameternamen um.
 
         Ensemble liefert z. B. t2m_p50 statt t2m. Durch die Umbenennung
@@ -130,7 +130,7 @@ class GeoSphereApi:
         return normalized
 
     @staticmethod
-    def _normalize_nowcast_params(entries: list[dict]) -> list[dict]:
+    def _normalize_nowcast_params(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Nowcast-Parameter in NWP-kompatible Namen umwandeln.
 
         Nowcast liefert rr (Niederschlagsrate kg/m²) + pt (Niederschlagstyp)
@@ -178,7 +178,7 @@ class GeoSphereApi:
         return normalized
 
     @staticmethod
-    def _deaccumulate_grad(entries: list[dict]) -> None:
+    def _deaccumulate_grad(entries: list[dict[str, Any]]) -> None:
         """NWP-Globalstrahlung von akkumulierten Ws/m² in mittlere W/m² je Zeitschritt umrechnen.
 
         NWP liefert grad als Energiesumme seit Modellstart (Ws/m²). Für stündliche Schritte
@@ -198,7 +198,7 @@ class GeoSphereApi:
             prev = raw
 
     @staticmethod
-    def _deaccumulate_precip(entries: list[dict]) -> None:
+    def _deaccumulate_precip(entries: list[dict[str, Any]]) -> None:
         """NWP/Ensemble-Niederschlag von akkumulierten mm in mm je Zeitschritt umrechnen.
 
         Die API liefert rain_acc/snow_acc als Summe seit Modellstart (mm).
@@ -245,7 +245,7 @@ class GeoSphereApi:
             return set()
         return {p.strip().strip("'\"") for p in match.group(1).split(",")}
 
-    def _parse_station_geojson(self, data: dict, station_id: str) -> dict[str, Any]:
+    def _parse_station_geojson(self, data: dict[str, Any], station_id: str) -> dict[str, Any]:
         """GeoJSON-Antwort in flaches Parameterwert-Dict umwandeln."""
         features = data.get("features", [])
         if not features:
@@ -356,7 +356,7 @@ class GeoSphereApi:
 
         raise GeoSphereApiError("Fehler beim Abrufen der Vorhersage")
 
-    def _parse_forecast_geojson(self, data: dict) -> list[dict[str, Any]]:
+    def _parse_forecast_geojson(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """
         NWP GeoJSON → Liste von Zeitschritt-Dicts.
         Jedes Dict hat 'datetime' + alle Parameter als Schlüssel.
@@ -378,7 +378,7 @@ class GeoSphereApi:
 
         feature = features[0]
         props = feature.get("properties", {})
-        param_data: dict[str, list] = {
+        param_data: dict[str, list[Any]] = {
             param_name: param_info.get("data", [])
             for param_name, param_info in props.get("parameters", {}).items()
         }
