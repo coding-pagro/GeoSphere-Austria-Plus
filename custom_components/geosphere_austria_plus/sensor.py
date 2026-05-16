@@ -25,8 +25,7 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -287,6 +286,8 @@ class TawesSensor(CoordinatorEntity[GeoSphereCurrentCoordinator], SensorEntity):
 
     _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
+    # Narrow the inherited attribute type so mypy sees the custom .param field.
+    entity_description: TawesSensorDescription
 
     def __init__(
         self,
@@ -312,15 +313,22 @@ class TawesSensor(CoordinatorEntity[GeoSphereCurrentCoordinator], SensorEntity):
         """
         if not getattr(super(), "available", True):
             return False
-        if self.coordinator.data is None:
+        # Defensive None-check: at runtime coordinator.data is None before the
+        # first refresh completes (mypy treats DataUpdateCoordinator.data as
+        # non-Optional, but it's only populated after the first successful
+        # update — getattr defeats the static check while keeping the guard).
+        data = getattr(self.coordinator, "data", None)
+        if data is None:
             return False
-        return self.entity_description.param in self.coordinator.data
+        return self.entity_description.param in data
 
     @property
     def native_value(self) -> float | None:
-        if self.coordinator.data is None:
+        data = getattr(self.coordinator, "data", None)
+        if data is None:
             return None
-        return self.coordinator.data.get(self.entity_description.param)
+        v: float | None = data.get(self.entity_description.param)
+        return v
 
 
 class GeoSphereWarningSensor(
@@ -348,7 +356,7 @@ class GeoSphereWarningSensor(
         warnings = self.coordinator.data or []
         if not warnings:
             return 0
-        return max(w["level"] for w in warnings)
+        return int(max(w["level"] for w in warnings))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -423,6 +431,9 @@ class _AirQualityBase(
 class AirQualitySensor(_AirQualityBase):
     """Stündlicher Schadstoffwert (erste Vorhersagestunde) als HA-Sensor."""
 
+    # Narrow the inherited attribute type so mypy sees the custom .param field.
+    entity_description: AirQualitySensorDescription
+
     def __init__(
         self,
         coordinator: GeoSphereAirQualityCoordinator,
@@ -453,7 +464,7 @@ class AirQualitySensor(_AirQualityBase):
         """24-Stunden-Vorhersage ab aktueller Stunde als Liste von {time, value}-Dicts."""
         data = self.coordinator.data or {}
         timestamps: list[str] = data.get("timestamps", [])
-        values: list = data.get(self.entity_description.param, [])
+        values: list[float | None] = data.get(self.entity_description.param, [])
         start = self._current_index()
         forecast = [
             {"time": ts, "value": round(v, 1)}

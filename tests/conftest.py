@@ -49,8 +49,13 @@ class _MockCoordinatorEntity:
 
     @property
     def available(self) -> bool:
-        """Mirror real CoordinatorEntity: available when coordinator has data."""
-        return True
+        """Mirror real CoordinatorEntity: unavailable when coordinator has no data.
+
+        Real HA: returns ``self.coordinator.last_update_success and super().available``.
+        For tests, the closest pragmatic stand-in is "data is populated" — most
+        tests set coordinator.data = None to mean unavailable.
+        """
+        return self.coordinator.data is not None
 
     async def async_added_to_hass(self):
         pass
@@ -142,6 +147,11 @@ _weather_mod.Forecast = _MockForecast
 _weather_mod.WeatherEntity = _MockWeatherEntity
 _weather_mod.WeatherEntityFeature = _MockWeatherEntityFeature
 
+# Production code imports WeatherEntityFeature from the .const submodule
+# (correct path per mypy strict reexport rules). Mirror it.
+_weather_const_mod = MagicMock()
+_weather_const_mod.WeatherEntityFeature = _MockWeatherEntityFeature
+
 _coordinator_mod = MagicMock()
 _coordinator_mod.DataUpdateCoordinator = _MockDataUpdateCoordinator
 _coordinator_mod.UpdateFailed = _MockUpdateFailed
@@ -176,6 +186,15 @@ _entity_mod.DeviceInfo = _MockDeviceInfo
 
 _device_registry_mod = MagicMock()
 _device_registry_mod.DeviceEntryType = _MockDeviceEntryType
+# Production code now imports DeviceInfo from device_registry (canonical location
+# per HA 2024.10+ deprecation of homeassistant.helpers.entity.DeviceInfo).
+_device_registry_mod.DeviceInfo = _MockDeviceInfo
+
+# Selector module: SelectOptionDict is a TypedDict (dict at runtime). Mock it
+# as a callable that returns a real dict so test asserts on result[i]["value"]
+# work — otherwise MagicMock() returns yet another MagicMock.
+_selector_mod = MagicMock()
+_selector_mod.SelectOptionDict = lambda **kwargs: dict(kwargs)
 
 class _MockConfigFlow:
     """Minimal stand-in for config_entries.ConfigFlow."""
@@ -221,6 +240,13 @@ _config_entries_mod.OptionsFlow = _MockOptionsFlow
 _config_entries_mod.ConfigEntryNotReady = Exception
 _config_entries_mod.callback = lambda f: f
 
+# Production code now imports ConfigEntryNotReady from homeassistant.exceptions
+# (the canonical location per mypy strict reexport rules). Mirror the symbol
+# in our mock so both import paths resolve.
+_exceptions_mod = MagicMock()
+_exceptions_mod.ConfigEntryNotReady = _config_entries_mod.ConfigEntryNotReady
+_exceptions_mod.HomeAssistantError = Exception
+
 # Echtes Modulobjekt für homeassistant, damit `from homeassistant import config_entries`
 # das richtige Mock-Objekt liefert (MagicMock.__getattr__ überschreibt sonst den Wert).
 _ha_mod = types.ModuleType("homeassistant")
@@ -237,7 +263,9 @@ sys.modules.update(
         "homeassistant.components": MagicMock(),
         "homeassistant.components.sensor": _sensor_mod,
         "homeassistant.components.weather": _weather_mod,
+        "homeassistant.components.weather.const": _weather_const_mod,
         "homeassistant.config_entries": _config_entries_mod,
+        "homeassistant.exceptions": _exceptions_mod,
         "homeassistant.const": _const_mod,
         "homeassistant.core": _core_mod,
         "homeassistant.helpers": MagicMock(),
@@ -245,8 +273,9 @@ sys.modules.update(
         "homeassistant.helpers.device_registry": _device_registry_mod,
         "homeassistant.helpers.entity": _entity_mod,
         "homeassistant.helpers.entity_platform": MagicMock(),
+        "homeassistant.helpers.event": MagicMock(),
         "homeassistant.helpers.update_coordinator": _coordinator_mod,
-        "homeassistant.helpers.selector": MagicMock(),
+        "homeassistant.helpers.selector": _selector_mod,
         "homeassistant.helpers.entity_registry": MagicMock(),
         "voluptuous": MagicMock(),
     }
@@ -256,3 +285,14 @@ sys.modules.update(
 # sys.modules state, before test files trigger their own imports.
 from custom_components.geosphere_austria_plus import weather as _weather_module  # noqa: E402
 from custom_components.geosphere_austria_plus import config_flow as _config_flow_module  # noqa: E402
+from custom_components.geosphere_austria_plus import coordinator as _coordinator_module  # noqa: E402
+
+# Production code uses module-level `async_call_later(hass, delay, cb)` from
+# homeassistant.helpers.event (the correct HA API; hass.async_call_later
+# doesn't exist). Existing tests still assert on `coord.hass.async_call_later`
+# for ergonomics, so we forward calls through the hass mock here.
+def _forward_async_call_later(hass, delay, callback):  # type: ignore[no-untyped-def]
+    return hass.async_call_later(delay, callback)
+
+
+_coordinator_module.async_call_later = _forward_async_call_later

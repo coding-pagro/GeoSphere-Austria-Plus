@@ -6,13 +6,10 @@ import math
 from collections import defaultdict
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from typing import Any
+from typing import Any, cast
 
-from homeassistant.components.weather import (
-    Forecast,
-    WeatherEntity,
-    WeatherEntityFeature,
-)
+from homeassistant.components.weather import Forecast, WeatherEntity
+from homeassistant.components.weather.const import WeatherEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfPressure,
@@ -22,7 +19,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -342,31 +339,33 @@ class GeoSphereWeatherEntity(
 
     @property
     def native_temperature(self) -> float | None:
-        v = self._current.get("TL")
+        v: float | None = self._current.get("TL")
         if v is not None:
             return v
         entry = self._first_forecast_entry
-        return entry.get("t2m") if entry else None
+        return cast("float | None", entry.get("t2m")) if entry else None
 
     @property
     def native_dew_point(self) -> float | None:
-        return self._current.get("TP")
+        v: float | None = self._current.get("TP")
+        return v
 
     @property
     def humidity(self) -> float | None:
-        v = self._current.get("RF")
+        v: float | None = self._current.get("RF")
         if v is not None:
             return v
         entry = self._first_forecast_entry
-        return entry.get("rh2m") if entry else None
+        return cast("float | None", entry.get("rh2m")) if entry else None
 
     @property
     def native_pressure(self) -> float | None:
-        return self._current.get("PRED") or self._current.get("P")
+        v: float | None = self._current.get("PRED") or self._current.get("P")
+        return v
 
     @property
     def wind_bearing(self) -> float | None:
-        v = self._current.get("DD")
+        v: float | None = self._current.get("DD")
         if v is not None:
             return v
         entry = self._first_forecast_entry
@@ -383,7 +382,7 @@ class GeoSphereWeatherEntity(
 
     @property
     def native_wind_speed(self) -> float | None:
-        v = self._current.get("FF")
+        v: float | None = self._current.get("FF")
         if v is not None:
             return v
         entry = self._first_forecast_entry
@@ -400,11 +399,12 @@ class GeoSphereWeatherEntity(
 
     @property
     def native_wind_gust_speed(self) -> float | None:
-        return self._current.get("FX")
+        v: float | None = self._current.get("FX")
+        return v
 
     @property
     def native_precipitation(self) -> float | None:
-        v = self._current.get("RR")
+        v: float | None = self._current.get("RR")
         if v is not None:
             return v
         entry = self._first_forecast_entry
@@ -508,7 +508,7 @@ class GeoSphereWeatherEntity(
         if hass is not None:
             sun_state = hass.states.get("sun.sun")
             if sun_state is not None:
-                return sun_state.state == "above_horizon"
+                return bool(sun_state.state == "above_horizon")
         now_utc = datetime.now(timezone.utc)
         local_hour = (now_utc.hour + self._lon / 15.0) % 24
         return 6.0 <= local_hour < 21.0
@@ -620,7 +620,7 @@ class GeoSphereWeatherEntity(
         today_key = now.strftime("%Y-%m-%d")
 
         # --- GeoSphere: group entries by day, track last UTC hour per future day ---
-        days: dict[str, list[dict]] = defaultdict(list)
+        days: dict[str, list[dict[str, Any]]] = defaultdict(list)
         day_last_utc_hour: dict[str, int] = {}
 
         for entry in self._forecast_raw:
@@ -647,7 +647,9 @@ class GeoSphereWeatherEntity(
             temps = [e["t2m"] for e in entries if e.get("t2m") is not None]
             rain_list = [e.get("rain_acc") or 0.0 for e in entries]
             snow_list = [e.get("snow_acc") or 0.0 for e in entries]
-            rh_list = [e.get("rh2m") for e in entries if e.get("rh2m") is not None]
+            rh_list: list[float] = [
+                e["rh2m"] for e in entries if e.get("rh2m") is not None
+            ]
             tcc_list = [e["tcc"] for e in entries if e.get("tcc") is not None]
 
             # Tagesextreme: native mxt2m/mnt2m vom Modell bevorzugen, sonst aus stündlichen
@@ -784,7 +786,7 @@ class GeoSphereWeatherEntity(
                     complete_gs[day_key] = forecast
 
         # Build Open-Meteo day lookup keyed by YYYY-MM-DD
-        om_days: dict[str, dict] = {}
+        om_days: dict[str, dict[str, Any]] = {}
         for om_entry in (self._open_meteo_coordinator.data or []):
             dt_str = om_entry.get("datetime", "")
             try:
@@ -810,7 +812,7 @@ class GeoSphereWeatherEntity(
 
     def _prepare_nowcast_tcc_context(
         self,
-    ) -> tuple[list[dict] | None, float | None]:
+    ) -> tuple[list[dict[str, Any]] | None, float | None]:
         """Vorberechnung für Nowcast-tcc-Auflösung — einmal pro Forecast-Build.
 
         Cacht NWP-Coordinator-Daten und TAWES-tcc-Proxy, damit nicht jeder
@@ -819,7 +821,7 @@ class GeoSphereWeatherEntity(
         Liefert: (nwp_data, tcc_tawes)
         """
         # NWP-Daten (erste passende NWP-Coordinator-Instanz)
-        nwp_data: list[dict] | None = None
+        nwp_data: list[dict[str, Any]] | None = None
         for name, coord in self._all_forecast_coordinators.items():
             if "nwp" not in name:
                 continue
@@ -839,7 +841,7 @@ class GeoSphereWeatherEntity(
     def _resolve_tcc_with_context(
         self,
         dt: datetime,
-        context: tuple[list[dict] | None, float | None],
+        context: tuple[list[dict[str, Any]] | None, float | None],
         now: datetime,
     ) -> float | None:
         """Reine Auflösungs-Logik mit vorberechnetem Kontext (Hot Path).
@@ -922,7 +924,7 @@ class GeoSphereWeatherEntity(
         local_hour = (dt.hour + self._lon / 15.0) % 24
         return 6.0 <= local_hour < 21.0
 
-    def _entry_is_daytime(self, entry: dict) -> bool:
+    def _entry_is_daytime(self, entry: dict[str, Any]) -> bool:
         """Return True if the entry's datetime timestamp falls in daytime hours."""
         ts = entry.get("datetime")
         if not ts:

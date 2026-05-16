@@ -11,6 +11,26 @@ permissions:
   contents: read
 
 jobs:
+  mypy:
+    name: mypy --strict (Platinum quality scale)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_test.txt
+          # HA runtime types are needed for strict checks (custom_components
+          # imports from homeassistant.* extensively).
+          pip install homeassistant
+      - name: Run mypy --strict
+        run: mypy custom_components/geosphere_austria_plus
+
   pytest:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

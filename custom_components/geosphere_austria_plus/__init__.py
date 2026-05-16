@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from typing import Any
 
-from homeassistant.config_entries import ConfigEntry, ConfigEntryNotReady
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -103,7 +106,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_ENABLE_OPEN_METEO, False),
     )
 
-    coordinators: dict = {DATA_FORECASTS: {}}
+    coordinators: dict[str, Any] = {DATA_FORECASTS: {}}
 
     # TAWES-Koordinator nur wenn Station konfiguriert
     if station_id:
@@ -182,7 +185,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-def _iter_coordinators(coordinators: dict):
+def _iter_coordinators(coordinators: dict[str, Any]) -> Iterator[Any]:
     """Alle Coordinator-Instanzen aus dem coordinators-Dict liefern.
 
     Liefert sowohl Top-Level-Coordinator-Werte als auch verschachtelte
