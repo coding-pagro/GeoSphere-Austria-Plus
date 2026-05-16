@@ -63,10 +63,27 @@
         "data_description": {
           "open_meteo_forecast_days": "Number of days (3–14) filled by Open-Meteo when the toggle above is on."
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure GeoSphere Austria Plus",
+        "description": "Adjust location, station, and forecast models. Changes take effect immediately after saving.",
+        "data": {
+          "name": "Name",
+          "lat": "Latitude",
+          "lon": "Longitude",
+          "station_id": "TAWES Station (optional)",
+          "forecast_models": "Forecast models (select 0–3)",
+          "enable_warnings": "Enable weather warnings",
+          "enable_air_quality": "Enable air quality index",
+          "enable_open_meteo": "Extend daily forecast via Open-Meteo",
+          "open_meteo_forecast_days": "Days of Open-Meteo forecast extension"
+        }
       }
     },
     "abort": {
-      "already_configured": "A location with these coordinates is already configured."
+      "already_configured": "A location with these coordinates is already configured.",
+      "reconfigure_unique_id_mismatch": "The new coordinates collide with another configured location.",
+      "reconfigure_successful": "Configuration updated successfully."
     }
   },
   "issues": {
@@ -80,6 +97,23 @@
       "can_reach_datahub": "Reach GeoSphere DataHub API",
       "can_reach_warnings": "Reach weather warnings API",
       "can_reach_open_meteo": "Reach Open-Meteo API"
+    }
+  },
+  "exceptions": {
+    "tawes_api_error": {
+      "message": "GeoSphere TAWES station API error: {error}"
+    },
+    "forecast_api_error": {
+      "message": "GeoSphere forecast API error for model {model}: {error}"
+    },
+    "warnings_api_error": {
+      "message": "Weather warnings API error: {error}"
+    },
+    "air_quality_api_error": {
+      "message": "Air quality API error: {error}"
+    },
+    "open_meteo_api_error": {
+      "message": "Open-Meteo daily-extension API error: {error}"
     }
   }
 }

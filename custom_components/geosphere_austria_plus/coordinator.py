@@ -116,7 +116,11 @@ class GeoSphereCurrentCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str, A
             cached = self._retry_on_failure("GeoSphere TAWES", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"GeoSphere API Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="tawes_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
 
 class GeoSphereForecastCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[str, Any]]]):
@@ -151,7 +155,11 @@ class GeoSphereForecastCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[
             cached = self._retry_on_failure(f"GeoSphere Vorhersage ({self.model})", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"GeoSphere Vorhersage Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="forecast_api_error",
+                translation_placeholders={"model": self.model, "error": str(err)},
+            ) from err
 
 
 class GeoSphereWarningsCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[str, Any]]]):
@@ -179,7 +187,11 @@ class GeoSphereWarningsCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[
             cached = self._retry_on_failure("Warnungs-API", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"Warnungs-API Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="warnings_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
 
 class GeoSphereAirQualityCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str, Any]]):
@@ -207,7 +219,11 @@ class GeoSphereAirQualityCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str
             cached = self._retry_on_failure("Luftqualitäts-API", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"Schadstoff-API Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="air_quality_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
 
 class GeoSphereOpenMeteoDailyCoordinator(_RetryMixin, DataUpdateCoordinator[list[dict[str, Any]]]):
@@ -235,4 +251,8 @@ class GeoSphereOpenMeteoDailyCoordinator(_RetryMixin, DataUpdateCoordinator[list
             cached = self._retry_on_failure("Open-Meteo", err)
             if cached is not None:
                 return cached
-            raise UpdateFailed(f"Open-Meteo Fehler: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="open_meteo_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
