@@ -298,7 +298,7 @@ class GeoSphereWeatherEntity(
     @property
     def attribution(self) -> str | None:
         if self._open_meteo_coordinator is not None and self._open_meteo_coordinator.data:
-            return f"{ATTRIBUTION}\n{OPEN_METEO_ATTRIBUTION}"
+            return f"{ATTRIBUTION}. {OPEN_METEO_ATTRIBUTION}"
         return ATTRIBUTION
 
     # ------------------------------------------------------------------
