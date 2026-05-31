@@ -45,9 +45,12 @@ if "homeassistant.helpers.update_coordinator" not in sys.modules:
         "homeassistant.config_entries": MagicMock(),
         "homeassistant.const": _const_mod,
         "homeassistant.core": MagicMock(),
+        "homeassistant.exceptions": MagicMock(),
         "homeassistant.helpers": MagicMock(),
         "homeassistant.helpers.aiohttp_client": MagicMock(),
         "homeassistant.helpers.entity_platform": MagicMock(),
+        "homeassistant.helpers.entity_registry": MagicMock(),
+        "homeassistant.helpers.issue_registry": MagicMock(),
         "homeassistant.helpers.update_coordinator": _coordinator_mod,
         "voluptuous": MagicMock(),
     })
