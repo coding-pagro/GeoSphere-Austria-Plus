@@ -76,7 +76,7 @@ jobs:
         # Public-repo uploads work without a token but may get rate-limited
         # — add CODECOV_TOKEN as a repo secret if uploads start being rejected.
         if: matrix.python-version == '3.13'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
           flags: unittests
