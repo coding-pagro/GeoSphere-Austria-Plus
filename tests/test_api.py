@@ -817,7 +817,7 @@ class TestDeaccumulateGrad:
         assert result is None
         assert entries[0]["grad"] == pytest.approx(1.0)
 
-    def test_nwp_forecast_applies_deaccumulation(self):
+    async def test_nwp_forecast_applies_deaccumulation(self):
         """get_forecast ruft _deaccumulate_grad für NWP-Modelle auf."""
         payload = _make_forecast_payload(
             ["2024-06-01T06:00:00Z", "2024-06-01T07:00:00Z"],
@@ -828,10 +828,7 @@ class TestDeaccumulateGrad:
         session.get = MagicMock(return_value=_make_mock_response(payload))
         api = GeoSphereApi(session)
 
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
-        )
+        result = await api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
         assert result[0]["grad"] == pytest.approx(0.0)    # 0/3600
         assert result[1]["grad"] == pytest.approx(200.0)  # (720000-0)/3600
 
@@ -895,7 +892,7 @@ class TestDeaccumulatePrecip:
         assert result is None
         assert entries[1]["rain_acc"] == pytest.approx(2.0)
 
-    def test_nwp_forecast_deaccumulates_precipitation(self):
+    async def test_nwp_forecast_deaccumulates_precipitation(self):
         """get_forecast de-akkumuliert rain_acc/snow_acc für NWP-Modelle."""
         payload = _make_forecast_payload(
             ["2024-06-01T06:00:00Z", "2024-06-01T07:00:00Z", "2024-06-01T08:00:00Z"],
@@ -907,10 +904,7 @@ class TestDeaccumulatePrecip:
         session.get = MagicMock(return_value=_make_mock_response(payload))
         api = GeoSphereApi(session)
 
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
-        )
+        result = await api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
         assert result[0]["rain_acc"] == pytest.approx(0.0)
         assert result[1]["rain_acc"] == pytest.approx(2.0)   # 2.0 - 0.0
         assert result[2]["rain_acc"] == pytest.approx(3.0)   # 5.0 - 2.0
