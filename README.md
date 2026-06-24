@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/coding-pagro/GeoSphere-Austria-Plus/actions/workflows/test.yml/badge.svg)](https://github.com/coding-pagro/GeoSphere-Austria-Plus/actions/workflows/test.yml)
 [![Validate](https://github.com/coding-pagro/GeoSphere-Austria-Plus/actions/workflows/validate.yml/badge.svg)](https://github.com/coding-pagro/GeoSphere-Austria-Plus/actions/workflows/validate.yml)
-[![codecov](https://codecov.io/gh/coding-pagro/GeoSphere-Austria-Plus/branch/main/graph/badge.svg)](https://codecov.io/gh/coding-pagro/GeoSphere-Austria-Plus)
+[![codecov](https://codecov.io/gh/coding-pagro/GeoSphere-Austria-Plus/graph/badge.svg)](https://codecov.io/gh/coding-pagro/GeoSphere-Austria-Plus)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![Quality Scale](https://img.shields.io/badge/quality_scale-platinum-e5e4e2.svg)](https://developers.home-assistant.io/docs/core/integration-quality-scale/)
 
