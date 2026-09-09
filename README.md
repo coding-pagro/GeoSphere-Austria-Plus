@@ -277,6 +277,20 @@ Beim Löschen des Config-Entry werden alle zugehörigen Entities, das Gerät und
 
 ---
 
+## Entwicklung
+
+Setup einer lokalen Entwicklungsumgebung, Tests und Typprüfung: siehe [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Kurzfassung — benötigt **Python ≥ 3.13.2**:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements_test.txt
+pip install --no-deps -r requirements_typing.txt
+```
+
+---
+
 ## Lizenz
 
 Die GeoSphere Austria API-Daten stehen unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — © [GeoSphere Austria](https://www.geosphere.at/).

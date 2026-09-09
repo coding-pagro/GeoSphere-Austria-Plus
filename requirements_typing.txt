@@ -1,0 +1,16 @@
+# Typquelle für mypy — NICHT mit "pip install -r" allein installieren.
+#
+# Immer mit --no-deps installieren:
+#
+#     pip install --no-deps -r requirements_typing.txt
+#
+# Home Assistant muss für die Typprüfung nicht lauffähig sein. Gebraucht
+# werden nur die getypten Quellen und der py.typed-Marker. Das Wheel ist
+# plattformunabhängig (py3-none-any), --no-deps spart daher Compiler und
+# rund hundert Transitivabhängigkeiten und funktioniert auch unter Windows.
+#
+# Exakt gepinnt, damit die strict-Typprüfung deterministisch gegen eine
+# bekannte Typoberfläche läuft. Dependabot hebt den Pin automatisch an.
+#
+# Voraussetzung: Python >= 3.13.2 (Requires-Python von Home Assistant).
+homeassistant==2026.2.3

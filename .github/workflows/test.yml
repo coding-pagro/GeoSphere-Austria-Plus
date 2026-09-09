@@ -18,16 +18,23 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
+          # Home Assistant requires Python >= 3.13.2; "3.13" resolves to the
+          # latest 3.13.x, which satisfies that.
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: requirements_test.txt
+          cache-dependency-path: |
+            requirements_test.txt
+            requirements_typing.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
           # HA runtime types are needed for strict checks (custom_components
-          # imports from homeassistant.* extensively).
-          pip install homeassistant
+          # imports from homeassistant.* extensively). --no-deps because mypy
+          # only needs the typed sources and the py.typed marker, not a
+          # runnable install; the version is pinned in requirements_typing.txt
+          # so the strict gate runs against a known type surface.
+          pip install --no-deps -r requirements_typing.txt
       - name: Run mypy --strict
         run: mypy custom_components/geosphere_austria_plus
 
