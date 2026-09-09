@@ -7,20 +7,17 @@ python_version = "3.13"
 strict = true
 warn_unreachable = true
 warn_return_any = true
-warn_unused_ignores = false
+warn_unused_ignores = true
 implicit_reexport = false
 disallow_untyped_defs = true
 disallow_any_generics = true
-disallow_subclassing_any = false
-disallow_untyped_calls = false
-disallow_untyped_decorators = false
 no_implicit_optional = true
 show_error_codes = true
 
 # Some Home Assistant submodules and voluptuous lack complete type stubs.
 # We don't want those to drown out our own typing signal.
 [[tool.mypy.overrides]]
-module = ["voluptuous", "voluptuous.*", "homeassistant", "homeassistant.*"]
+module = ["voluptuous", "voluptuous.*"]
 ignore_missing_imports = true
 
 # Only the integration source is strict-checked; the test suite uses

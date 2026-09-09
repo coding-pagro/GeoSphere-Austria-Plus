@@ -240,7 +240,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
         })
 
 
-class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
+class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config Flow Handler."""
 
     VERSION = 1

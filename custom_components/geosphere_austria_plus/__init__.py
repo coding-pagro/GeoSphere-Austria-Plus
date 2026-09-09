@@ -202,7 +202,7 @@ def _iter_coordinators(coordinators: dict[str, Any]) -> Iterator[Any]:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Eintrag entladen."""
-    unload_ok: bool = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         coordinators = hass.data[DOMAIN].pop(entry.entry_id, {})
         # Geplante Retry-Timer/Tasks aller Coordinatoren abbrechen,
