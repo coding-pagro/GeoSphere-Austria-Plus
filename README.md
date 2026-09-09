@@ -286,7 +286,7 @@ Kurzfassung — benötigt **Python ≥ 3.13.2**:
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements_test.txt
-pip install homeassistant --no-deps
+pip install --no-deps -r requirements_typing.txt
 ```
 
 ---
