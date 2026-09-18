@@ -17,7 +17,9 @@ updates:
       prefix: "ci"
       include: "scope"
 
-  # Python test dependencies (pytest, pytest-asyncio, aiohttp, coverage).
+  # Python test dependencies (pytest, pytest-asyncio, aiohttp, coverage) from
+  # requirements_test.txt, plus the pinned Home Assistant type source from
+  # requirements_typing.txt.
   # Production has no requirements (integration uses only HA-bundled libs).
   - package-ecosystem: "pip"
     directory: "/"

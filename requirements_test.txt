@@ -1,3 +1,9 @@
+# Test- und Lint-Abhängigkeiten.
+#
+# Home Assistant steht bewusst NICHT hier, sondern in
+# requirements_typing.txt: es wird ausschliesslich für mypy gebraucht und
+# muss mit --no-deps installiert werden. Die Testsuite selbst kommt ohne
+# Home Assistant aus, da tests/conftest.py alle benötigten Module mockt.
 pytest>=9.1.1
 pytest-asyncio>=1.4.0
 pytest-cov>=7.1.0
