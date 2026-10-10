@@ -12,5 +12,5 @@
 # Exakt gepinnt, damit die strict-Typprüfung deterministisch gegen eine
 # bekannte Typoberfläche läuft. Dependabot hebt den Pin automatisch an.
 #
-# Voraussetzung: Python >= 3.13.2 (Requires-Python von Home Assistant).
+# Voraussetzung: Python >= 3.14.2 (Requires-Python von Home Assistant).
 homeassistant==2026.9.4

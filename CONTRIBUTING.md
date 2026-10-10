@@ -9,7 +9,7 @@ in der **Tests und Typprüfung dieselben Ergebnisse liefern wie die CI**.
 
 | Anforderung | Version | Warum |
 |---|---|---|
-| Python | **≥ 3.13.2** | Home Assistant setzt `Requires-Python >= 3.13.2`. Mit älterem Python schlägt das Setup fehl — siehe [Stolperfallen](#stolperfallen). |
+| Python | **≥ 3.14.2** | Home Assistant setzt `Requires-Python >= 3.14.2`. Mit älterem Python schlägt das Setup fehl — siehe [Stolperfallen](#stolperfallen). |
 | git | beliebig | — |
 
 Python-Version prüfen:
@@ -18,7 +18,7 @@ Python-Version prüfen:
 python --version
 ```
 
-Meldet der Befehl 3.12 oder älter, zuerst ein aktuelles Python installieren.
+Meldet der Befehl 3.13 oder älter, zuerst ein aktuelles Python installieren.
 Ohne das funktioniert der Rest dieser Anleitung nicht.
 
 ---
@@ -81,7 +81,7 @@ lauffähiges — Home Assistant wird dabei überschrieben und nie importiert.
 
 | Symptom | Ursache | Lösung |
 |---|---|---|
-| `pip install homeassistant` bricht mit `Failed building wheel for PyRIC` ab | Lokales Python ist älter als 3.13.2. pip findet keine aktuelle Home-Assistant-Version und fällt still auf eine mehrere Jahre alte zurück, die eine nicht mehr baubare Abhängigkeit zieht. | Python ≥ 3.13.2 installieren. |
+| `pip install homeassistant` bricht mit `Failed building wheel for PyRIC` ab | Lokales Python ist älter als 3.14.2. pip findet keine aktuelle Home-Assistant-Version und fällt still auf eine mehrere Jahre alte zurück, die eine nicht mehr baubare Abhängigkeit zieht. | Python ≥ 3.14.2 installieren. |
 | mypy meldet dutzendfach `Cannot find implementation or library stub for module named "homeassistant.*"` | Home Assistant ist nicht installiert. | Schritt 3 des Setups ausführen. |
 | mypy meldet `Skipping analyzing "homeassistant.*": missing library stubs or py.typed marker` | Eine sehr alte Home-Assistant-Version ist installiert; `py.typed` kam erst später dazu. | `pip install --no-deps --force-reinstall -r requirements_typing.txt` |
 | mypy meldet `Invalid syntax; you likely need to run mypy using Python 3.13 or newer` | mypy läuft unter einem älteren Interpreter als dem der virtuellen Umgebung. | mypy innerhalb der aktivierten venv aufrufen. |

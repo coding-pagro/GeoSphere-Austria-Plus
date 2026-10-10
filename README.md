@@ -281,7 +281,7 @@ Beim Löschen des Config-Entry werden alle zugehörigen Entities, das Gerät und
 
 Setup einer lokalen Entwicklungsumgebung, Tests und Typprüfung: siehe [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Kurzfassung — benötigt **Python ≥ 3.13.2**:
+Kurzfassung — benötigt **Python ≥ 3.14.2**:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
