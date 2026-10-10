@@ -3,7 +3,7 @@
 # a build backend — this file exists only to hold mypy settings.
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 strict = true
 warn_unreachable = true
 warn_return_any = true
