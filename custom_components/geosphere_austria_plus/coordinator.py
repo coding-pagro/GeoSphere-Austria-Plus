@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import Any, cast
 
 import aiohttp
-from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -96,6 +96,9 @@ class _RetryMixin:
             label, delay, err,
         )
 
+        # @callback ist Pflicht: ohne Markierung führt HA den Timer-Callback im
+        # Executor-Thread aus, und async_create_task wirft dort RuntimeError (#53).
+        @callback
         def _trigger_retry(_now: Any) -> None:
             """Timer-Callback: Refresh als trackbaren Task starten."""
             self._cancel_retry = None

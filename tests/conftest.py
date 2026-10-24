@@ -253,9 +253,15 @@ _ha_mod = types.ModuleType("homeassistant")
 _ha_mod.config_entries = _config_entries_mod
 
 _core_mod = MagicMock()
-# @callback ist in HA ein no-op-Decorator → durchreichen, sonst werden
-# dekorierte Funktionen durch MagicMocks ersetzt.
-_core_mod.callback = lambda f: f
+# @callback markiert in HA die Funktion nur mit _hass_callback → nachbilden,
+# sonst werden dekorierte Funktionen durch MagicMocks ersetzt und Tests können
+# nicht prüfen, ob ein Callback im Event-Loop (statt im Executor) läuft.
+def _mock_callback(f):  # type: ignore[no-untyped-def]
+    setattr(f, "_hass_callback", True)
+    return f
+
+
+_core_mod.callback = _mock_callback
 
 sys.modules.update(
     {

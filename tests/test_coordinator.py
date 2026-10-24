@@ -253,6 +253,19 @@ class TestRetryLifecycle:
         assert coord._pending_retry_task is fake_task
         assert coord._cancel_retry is None  # Timer-Handle wurde geleert
 
+    @pytest.mark.asyncio
+    async def test_retry_callback_runs_in_event_loop(self):
+        """Regression #53: Ohne @callback führt HA den Timer-Callback im
+        Executor-Thread aus → async_create_task wirft RuntimeError."""
+        coord = _make_coordinator(GeoSphereCurrentCoordinator, station_id="11035")
+        coord._last_good_data = {"TL": 18.5}
+        coord._api.get_current = AsyncMock(side_effect=GeoSphereApiError("timeout"))
+
+        await coord._async_update_data()
+
+        cb = coord.hass.async_call_later.call_args[0][1]
+        assert getattr(cb, "_hass_callback", False) is True
+
 
 # ---------------------------------------------------------------------------
 # Andere Koordinatoren – Stichproben für Fallback + Retry
