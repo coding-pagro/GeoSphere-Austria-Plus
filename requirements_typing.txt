@@ -13,4 +13,4 @@
 # bekannte Typoberfläche läuft. Dependabot hebt den Pin automatisch an.
 #
 # Voraussetzung: Python >= 3.14.2 (Requires-Python von Home Assistant).
-homeassistant==2026.9.4
+homeassistant==2026.10.2
