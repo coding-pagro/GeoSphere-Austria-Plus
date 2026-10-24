@@ -127,7 +127,7 @@ class TestDiagnosticsCoordinatorSnapshot:
         entry = _make_entry(data={CONF_LATITUDE: 48.21, CONF_LONGITUDE: 16.37})
         coords = {
             DATA_FORECASTS: {
-                "nwp-v1-1h-2500m": _make_coordinator_stub("nwp", [{"t2m": 15}]),
+                "nwp-v2-1h-1km": _make_coordinator_stub("nwp", [{"t2m": 15}]),
                 "nowcast-v1-15min-1km": _make_coordinator_stub("nc", [{"t2m": 14}]),
             },
         }
@@ -136,7 +136,7 @@ class TestDiagnosticsCoordinatorSnapshot:
         result = await async_get_config_entry_diagnostics(hass, entry)
 
         forecasts = result["coordinators"][DATA_FORECASTS]
-        assert set(forecasts.keys()) == {"nwp-v1-1h-2500m", "nowcast-v1-15min-1km"}
+        assert set(forecasts.keys()) == {"nwp-v2-1h-1km", "nowcast-v1-15min-1km"}
         for snap in forecasts.values():
             assert snap["data_entries"] == 1
 

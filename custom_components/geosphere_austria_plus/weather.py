@@ -334,7 +334,7 @@ class GeoSphereWeatherEntity(
     # ------------------------------------------------------------------
     # Aktuelle Werte – aus TAWES wenn vorhanden, sonst aus erstem
     # Vorhersagepunkt (Fallback ohne konfigurierte Station).
-    # Kein Forecast-Äquivalent: Taupunkt, Luftdruck, Böen.
+    # Kein Forecast-Äquivalent: Taupunkt.
     # ------------------------------------------------------------------
 
     @property
@@ -361,7 +361,10 @@ class GeoSphereWeatherEntity(
     @property
     def native_pressure(self) -> float | None:
         v: float | None = self._current.get("PRED") or self._current.get("P")
-        return v
+        if v is not None:
+            return v
+        entry = self._first_forecast_entry
+        return cast("float | None", entry.get("pressure")) if entry else None
 
     @property
     def wind_bearing(self) -> float | None:
@@ -400,7 +403,10 @@ class GeoSphereWeatherEntity(
     @property
     def native_wind_gust_speed(self) -> float | None:
         v: float | None = self._current.get("FX")
-        return v
+        if v is not None:
+            return v
+        entry = self._first_forecast_entry
+        return cast("float | None", entry.get("wind_gust_speed")) if entry else None
 
     @property
     def native_precipitation(self) -> float | None:
@@ -412,8 +418,7 @@ class GeoSphereWeatherEntity(
             return None
         # Nach Normalisierung in api.py liefern alle Modelle rain_acc/snow_acc als mm/Zeitschritt:
         #   - Nowcast: aus rr+pt abgeleitet (_normalize_nowcast_params)
-        #   - Ensemble: rain_p50/snow_p50 als Periodensummen (_normalize_ensemble_params)
-        #   - NWP: nach _deaccumulate_precip de-akkumuliert
+        #   - NWP/Ensemble: rain/sf (bzw. _p50) sind Intervallwerte (_normalize_v2_params)
         rain = entry.get("rain_acc") or 0.0
         snow = entry.get("snow_acc") or 0.0
         if rain == 0.0 and snow == 0.0:
@@ -553,20 +558,14 @@ class GeoSphereWeatherEntity(
             rh = entry.get("rh2m")
             u10 = entry.get("u10m") or 0.0
             v10 = entry.get("v10m") or 0.0
-            ugust = entry.get("ugust")
-            vgust = entry.get("vgust")
+            # Alle Modelle liefern die Böe skalar (NWP/Ensemble: 10fg, Nowcast: fx)
+            wind_gust: float | None = entry.get("wind_gust_speed")
             tcc = entry.get("tcc")
             # Nowcast never provides tcc; resolve from NWP/TAWES blend when available.
             if tcc is None and nowcast_tcc_ctx is not None:
                 tcc = self._resolve_tcc_with_context(dt, nowcast_tcc_ctx, now)
             wind_speed = math.sqrt(u10**2 + v10**2)
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
-            if ugust is not None and vgust is not None:
-                # NWP/Ensemble: Böe aus Windvektorkomponenten berechnen
-                wind_gust: float | None = math.sqrt(ugust**2 + vgust**2)
-            else:
-                # Nowcast: fx ist bereits eine skalare Böengeschwindigkeit
-                wind_gust = entry.get("wind_gust_speed")
 
             is_day = self._is_dt_daytime(dt)
             # sy (symbol code) is only present in NWP model output.
@@ -584,6 +583,7 @@ class GeoSphereWeatherEntity(
                 native_wind_speed=wind_speed,
                 wind_bearing=wind_bearing,
                 native_wind_gust_speed=wind_gust,
+                native_pressure=entry.get("pressure"),
                 is_daytime=is_day,
             )
             # Forecast ist ein TypedDict — HA preserved zusätzliche Keys beim
@@ -651,17 +651,15 @@ class GeoSphereWeatherEntity(
                 e["rh2m"] for e in entries if e.get("rh2m") is not None
             ]
             tcc_list = [e["tcc"] for e in entries if e.get("tcc") is not None]
+            pressure_list: list[float] = [
+                e["pressure"] for e in entries if e.get("pressure") is not None
+            ]
 
-            # Tagesextreme: native mxt2m/mnt2m vom Modell bevorzugen, sonst aus stündlichen
-            # t2m-Werten ableiten. Das Modell kennt Peaks auch zwischen vollen Stunden.
-            mxt2m_list = [e["mxt2m"] for e in entries if e.get("mxt2m") is not None]
-            mnt2m_list = [e["mnt2m"] for e in entries if e.get("mnt2m") is not None]
-            t_max = max(mxt2m_list) if mxt2m_list else (max(temps) if temps else None)
-            t_min = min(mnt2m_list) if mnt2m_list else (min(temps) if temps else None)
-            # rain_acc/snow_acc sind immer Intervallwerte (mm/Zeitschritt):
-            # NWP: nach _deaccumulate_precip in api.py de-akkumuliert.
-            # Ensemble: rain_p50/snow_p50 sind Periodensummen (mm/Periode, kein Delta nötig).
-            # Direkte Summe ergibt in beiden Fällen die korrekte Tagessumme.
+            # Tagesextreme aus stündlichen t2m-Werten (v2-Modelle liefern kein mxt2m/mnt2m)
+            t_max = max(temps) if temps else None
+            t_min = min(temps) if temps else None
+            # rain_acc/snow_acc sind bei allen Modellen Intervallwerte (mm/Zeitschritt):
+            # Direkte Summe ergibt die korrekte Tagessumme.
             rain_total = sum(max(0.0, r) for r in rain_list)
             snow_total = sum(max(0.0, s) for s in snow_list)
             tcc_avg = sum(tcc_list) / len(tcc_list) if tcc_list else None
@@ -672,12 +670,6 @@ class GeoSphereWeatherEntity(
             ]
             wind_max: float | None = max(wind_speeds) if wind_speeds else None
             gust_speeds = [
-                math.sqrt(e["ugust"] ** 2 + e["vgust"] ** 2)
-                for e in entries
-                if e.get("ugust") is not None and e.get("vgust") is not None
-            ]
-            # For Nowcast entries that carry wind_gust_speed directly
-            gust_speeds += [
                 e["wind_gust_speed"]
                 for e in entries
                 if e.get("wind_gust_speed") is not None
@@ -690,13 +682,20 @@ class GeoSphereWeatherEntity(
             # for Ensemble/Nowcast.
             daytime_sy: list[int] = []
             tcc_daytime_list: list[float] = []
-            if "nwp" in self._model:
-                for e in entries:
-                    if self._entry_is_daytime(e):
-                        if (sy_val := _coerce_sy(e.get("sy"))) is not None:
-                            daytime_sy.append(sy_val)
-                        if (tcc_val := e.get("tcc")) is not None:
-                            tcc_daytime_list.append(float(tcc_val))
+            for e in entries:
+                if self._entry_is_daytime(e):
+                    if "nwp" in self._model and (sy_val := _coerce_sy(e.get("sy"))) is not None:
+                        daytime_sy.append(sy_val)
+                    if (tcc_val := e.get("tcc")) is not None:
+                        tcc_daytime_list.append(float(tcc_val))
+            # Daytime-only tcc prevents clear nights from dragging the daily cloud
+            # cover down (Ensemble v2 delivers real night-time tcc, unlike the former
+            # sunshine-duration proxy which treated every night as overcast).
+            tcc_day = (
+                sum(tcc_daytime_list) / len(tcc_daytime_list)
+                if tcc_daytime_list
+                else tcc_avg
+            )
 
             if daytime_sy:
                 max_sy = max(daytime_sy)
@@ -712,17 +711,12 @@ class GeoSphereWeatherEntity(
                     # code: a few overcast afternoon hours should not override an otherwise
                     # sunny day. Consistent with Pirate Weather / NWS / Meteoblue practice
                     # of averaging cloud cover rather than maximising it for non-precipitation
-                    # days. Daytime-only tcc prevents clear nights from dragging it down.
-                    tcc_day = (
-                        sum(tcc_daytime_list) / len(tcc_daytime_list)
-                        if tcc_daytime_list
-                        else tcc_avg
-                    )
+                    # days.
                     cond = nwp_to_condition(tcc_day, 0.0, 0.0, wind_max or 0.0, True)
             else:
                 # wind_max may be None (no wind vector available) → 0.0 as fallback
                 cond = nwp_to_condition(
-                    tcc_avg,
+                    tcc_day,
                     rain_total / max(len(entries), 1),
                     snow_total / max(len(entries), 1),
                     wind_max or 0.0,
@@ -759,6 +753,11 @@ class GeoSphereWeatherEntity(
                 humidity=sum(rh_list) / len(rh_list) if rh_list else None,
                 native_wind_speed=wind_max,
                 native_wind_gust_speed=gust_max,
+                native_pressure=(
+                    round(sum(pressure_list) / len(pressure_list), 1)
+                    if pressure_list
+                    else None
+                ),
                 is_daytime=True,
             )
             if snowlmt_min is not None:

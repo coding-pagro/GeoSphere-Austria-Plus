@@ -16,6 +16,7 @@ from .const import (
     TAWES_RESOURCE,
     TAWES_PARAMS,
     NWP_PARAMS,
+    NWP_PARAM_MAP,
     NOWCAST_PARAMS,
     ENSEMBLE_PARAMS,
     ENSEMBLE_PARAM_MAP,
@@ -109,23 +110,25 @@ class GeoSphereApi:
         raise GeoSphereApiError(f"Fehler beim Abrufen aktueller Daten für Station {station_id}")
 
     @staticmethod
-    def _normalize_ensemble_params(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Benennt Ensemble-Parameternamen in NWP-Parameternamen um.
+    def _normalize_v2_params(
+        entries: list[dict[str, Any]], param_map: dict[str, str]
+    ) -> list[dict[str, Any]]:
+        """NWP-/Ensemble-v2-Parameter in interne Namen und Einheiten umwandeln.
 
-        Ensemble liefert z. B. t2m_p50 statt t2m. Durch die Umbenennung
-        kann weather.py beide Modelle identisch verarbeiten.
-        Sunshine-Dauer (sundur, s/h) wird in approximative Wolkenbedeckung
-        tcc [0–1] umgerechnet: tcc = 1 - sundur / 3600.
+        v2 nutzt GRIB-Kurznamen (2t, 10u, …), Ensemble zusätzlich das Suffix
+        _p50. Durch die Umbenennung kann weather.py alle Modelle identisch
+        verarbeiten. Einheiten werden angeglichen: tcc % → Anteil 0–1,
+        msl Pa → hPa. Niederschlag und Strahlung sind bereits Intervallwerte.
         """
         normalized = []
         for entry in entries:
-            new = {"datetime": entry.get("datetime")}
-            for old_key, new_key in ENSEMBLE_PARAM_MAP.items():
-                new[new_key] = entry.get(old_key)
-            # Wolkenbedeckung aus Sonnenscheindauer ableiten
-            sundur = new.pop("sundur", None)
-            if sundur is not None:
-                new["tcc"] = max(0.0, 1.0 - sundur / 3600.0)
+            new: dict[str, Any] = {"datetime": entry.get("datetime")}
+            for api_key, internal_key in param_map.items():
+                new[internal_key] = entry.get(api_key)
+            if new.get("tcc") is not None:
+                new["tcc"] = new["tcc"] / 100.0
+            if new.get("pressure") is not None:
+                new["pressure"] = round(new["pressure"] / 100.0, 1)
             normalized.append(new)
         return normalized
 
@@ -176,52 +179,6 @@ class GeoSphereApi:
                 "tcc": None,  # Nowcast liefert keine Wolkenbedeckung
             })
         return normalized
-
-    @staticmethod
-    def _deaccumulate_grad(entries: list[dict[str, Any]]) -> None:
-        """NWP-Globalstrahlung von akkumulierten Ws/m² in mittlere W/m² je Zeitschritt umrechnen.
-
-        NWP liefert grad als Energiesumme seit Modellstart (Ws/m²). Für stündliche Schritte
-        ergibt Delta/3600 die mittlere Bestrahlungsstärke (W/m²) des jeweiligen Zeitschritts.
-        Negative Deltas (Modell-Reset) werden als 0 behandelt. Ändert die Einträge in-place.
-        """
-        prev: float | None = None
-        for entry in entries:
-            raw = entry.get("grad")
-            if raw is None:
-                prev = None
-                continue
-            if prev is None:
-                entry["grad"] = round(raw / 3600.0, 2)
-            else:
-                entry["grad"] = round(max(0.0, raw - prev) / 3600.0, 2)
-            prev = raw
-
-    @staticmethod
-    def _deaccumulate_precip(entries: list[dict[str, Any]]) -> None:
-        """NWP/Ensemble-Niederschlag von akkumulierten mm in mm je Zeitschritt umrechnen.
-
-        Die API liefert rain_acc/snow_acc als Summe seit Modellstart (mm).
-        Das Delta aufeinanderfolgender Zeitschritte ergibt den Intervallniederschlag.
-        Negative Deltas (Modell-Reset) werden als 0 behandelt. Ändert die Einträge in-place.
-        Der erste Eintrag enthält die Akkumulation ab Modellstart und wird direkt übernommen.
-        """
-        prev_rain: float | None = None
-        prev_snow: float | None = None
-        for entry in entries:
-            raw_rain = entry.get("rain_acc")
-            if raw_rain is not None:
-                entry["rain_acc"] = round(max(0.0, raw_rain if prev_rain is None else raw_rain - prev_rain), 2)
-                prev_rain = raw_rain
-            else:
-                prev_rain = None
-
-            raw_snow = entry.get("snow_acc")
-            if raw_snow is not None:
-                entry["snow_acc"] = round(max(0.0, raw_snow if prev_snow is None else raw_snow - prev_snow), 2)
-                prev_snow = raw_snow
-            else:
-                prev_snow = None
 
     @staticmethod
     def _extract_missing_params(detail: str) -> set[str]:
@@ -342,17 +299,11 @@ class GeoSphereApi:
                 raise GeoSphereApiError(f"Fehler beim Abrufen der Vorhersage: {err}") from err
             result = self._parse_forecast_geojson(data)
             if "ensemble" in model:
-                result = self._normalize_ensemble_params(result)
-                # rain_p50/snow_p50 sind Periodensummen (mm/Periode, 1h Fenster),
-                # keine Akkumulationen seit Modellstart → direkt übernehmen, kein _deaccumulate_precip.
-            elif "nowcast" in model:
-                # Nowcast liefert rr bereits als Intervallrate → keine De-Akkumulation nötig
-                result = self._normalize_nowcast_params(result)
-            else:
-                # NWP: grad und rain_acc/snow_acc sind akkumuliert seit Modellstart
-                self._deaccumulate_grad(result)
-                self._deaccumulate_precip(result)
-            return result
+                return self._normalize_v2_params(result, ENSEMBLE_PARAM_MAP)
+            if "nwp" in model:
+                return self._normalize_v2_params(result, NWP_PARAM_MAP)
+            # Nowcast liefert rr bereits als Intervallrate → keine De-Akkumulation nötig
+            return self._normalize_nowcast_params(result)
 
         raise GeoSphereApiError("Fehler beim Abrufen der Vorhersage")
 

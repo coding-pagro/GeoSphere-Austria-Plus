@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
@@ -28,6 +28,7 @@ from .const import (
     DATA_AIR_QUALITY,
     DATA_OPEN_METEO_DAILY,
     DEFAULT_FORECAST_MODEL,
+    LEGACY_FORECAST_MODEL_MAP,
 )
 from .coordinator import (
     GeoSphereCurrentCoordinator,
@@ -45,6 +46,63 @@ PLATFORMS = [Platform.WEATHER, Platform.SENSOR]
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Eintrag bei Optionsänderung neu laden."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+def _migrate_model_ids(models: list[str]) -> list[str]:
+    """Eingestellte Modell-IDs durch Nachfolger ersetzen (Reihenfolge bleibt, keine Duplikate)."""
+    migrated: list[str] = []
+    for model in models:
+        new_model = LEGACY_FORECAST_MODEL_MAP.get(model, model)
+        if new_model not in migrated:
+            migrated.append(new_model)
+    return migrated
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Config-Eintrag auf die aktuelle Version migrieren.
+
+    v1 → v2: GeoSphere stellt nwp-v1-1h-2500m und ensemble-v1-1h-2500m am
+    04.11.2026 ein. Modell-IDs in data/options werden auf die v2-Nachfolger
+    umgestellt, ebenso die Unique-IDs der Weather-Entities — sonst würde die
+    Cleanup-Logik in async_setup_entry die alten Entities löschen und neue mit
+    anderer entity_id anlegen.
+    """
+    if entry.version > 2:
+        # Downgrade von einer neueren Version wird nicht unterstützt
+        return False
+
+    if entry.version == 1:
+        data = dict(entry.data)
+        options = dict(entry.options)
+        if CONF_FORECAST_MODELS in data:
+            data[CONF_FORECAST_MODELS] = _migrate_model_ids(data[CONF_FORECAST_MODELS])
+        if CONF_FORECAST_MODEL in data:
+            data[CONF_FORECAST_MODEL] = LEGACY_FORECAST_MODEL_MAP.get(
+                data[CONF_FORECAST_MODEL], data[CONF_FORECAST_MODEL]
+            )
+        if CONF_FORECAST_MODELS in options:
+            options[CONF_FORECAST_MODELS] = _migrate_model_ids(options[CONF_FORECAST_MODELS])
+
+        @callback
+        def _migrate_unique_id(reg_entry: er.RegistryEntry) -> dict[str, Any] | None:
+            for old_model, new_model in LEGACY_FORECAST_MODEL_MAP.items():
+                suffix = f"_{old_model}"
+                if reg_entry.unique_id.endswith(suffix):
+                    return {
+                        "new_unique_id": reg_entry.unique_id[: -len(suffix)] + f"_{new_model}"
+                    }
+            return None
+
+        await er.async_migrate_entries(hass, entry.entry_id, _migrate_unique_id)
+        hass.config_entries.async_update_entry(
+            entry, data=data, options=options, version=2
+        )
+        _LOGGER.info(
+            "Config-Eintrag %s auf Version 2 migriert (Vorhersagemodelle v1 → v2)",
+            entry.entry_id,
+        )
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

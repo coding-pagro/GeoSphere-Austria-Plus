@@ -342,13 +342,13 @@ class TestGetForecast:
     async def test_success_returns_list(self):
         payload = _make_forecast_payload(
             ["2024-06-01T12:00:00Z"],
-            t2m=[10.0],
+            **{"2t": [10.0]},
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
         api = GeoSphereApi(session)
 
-        result = await api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
+        result = await api.get_forecast(48.21, 16.37, "nwp-v2-1h-1km")
         assert isinstance(result, list)
         assert result[0]["t2m"] == 10.0
 
@@ -364,7 +364,7 @@ class TestGetForecast:
         api = GeoSphereApi(session)
 
         with pytest.raises(GeoSphereApiError, match="Fehler beim Abrufen der Vorhersage"):
-            await api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
+            await api.get_forecast(48.21, 16.37, "nwp-v2-1h-1km")
 
     async def test_nowcast_model_uses_different_params(self):
         """Nowcast model should NOT include cape/msl in the URL params."""
@@ -379,133 +379,170 @@ class TestGetForecast:
         assert "cape" not in url_called
         assert "msl" not in url_called
 
-    async def test_nwp_model_uses_full_params(self):
-        """NWP model should include tcc, rain_acc, wind, grad and Tier-1 params (snowlmt, cape, mxt2m/mnt2m)."""
+    async def test_nwp_model_uses_v2_params(self):
+        """NWP v2 requests the GRIB short names incl. sy, snowlmt, cape and msl."""
         payload = {"features": [{"properties": {"parameters": {}}}]}
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
         api = GeoSphereApi(session)
 
-        await api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
+        await api.get_forecast(48.21, 16.37, "nwp-v2-1h-1km")
 
         url_called = session.get.call_args[0][0]
-        assert "tcc" in url_called
-        assert "rain_acc" in url_called
-        assert "u10m" in url_called
-        assert "grad" in url_called
-        # Tier 1 additions
-        assert "snowlmt" in url_called
-        assert "cape" in url_called
-        assert "mxt2m" in url_called
-        assert "mnt2m" in url_called
-        # msl is still not requested
-        assert "msl" not in url_called
+        assert "/timeseries/forecast/nwp-v2-1h-1km?" in url_called
+        params = url_called.split("parameters=")[1].split("&")[0].split(",")
+        assert params == [
+            "2t", "2r", "10u", "10v", "10fg", "rain", "sf", "tcc",
+            "ssrd", "sy", "snowlmt", "cape", "msl",
+        ]
+
+    async def test_nwp_model_normalizes_names_and_units(self):
+        """v2-Namen → interne Namen; tcc % → 0–1, msl Pa → hPa, Rest unverändert."""
+        payload = _make_forecast_payload(
+            ["2024-06-01T12:00:00Z"],
+            **{
+                "2t": [12.5], "2r": [51.5], "10u": [5.3], "10v": [-1.8],
+                "10fg": [11.5], "rain": [0.4], "sf": [0.1], "tcc": [91.5],
+                "ssrd": [395.5], "sy": [5.0], "snowlmt": [1271.1],
+                "cape": [0.8], "msl": [101793.85],
+            },
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "nwp-v2-1h-1km")
+
+        assert result[0] == {
+            "datetime": "2024-06-01T12:00:00Z",
+            "t2m": 12.5,
+            "rh2m": 51.5,
+            "u10m": 5.3,
+            "v10m": -1.8,
+            "wind_gust_speed": 11.5,
+            "rain_acc": 0.4,
+            "snow_acc": 0.1,
+            "tcc": pytest.approx(0.915),
+            "grad": 395.5,
+            "sy": 5.0,
+            "snowlmt": 1271.1,
+            "cape": 0.8,
+            "pressure": 1017.9,
+        }
+
+    async def test_nwp_precip_and_radiation_not_deaccumulated(self):
+        """v2 liefert rain/sf/ssrd als Intervallwerte — sie werden unverändert übernommen.
+
+        Würde noch wie bei v1 de-akkumuliert, ergäbe entry[2] ein geklemmtes
+        Delta (0.3 - 1.2 → 0.0) statt 0.3.
+        """
+        payload = _make_forecast_payload(
+            ["2024-06-01T00:00:00Z", "2024-06-01T01:00:00Z", "2024-06-01T02:00:00Z"],
+            rain=[0.5, 1.2, 0.3],
+            sf=[2.0, 0.5, 1.8],
+            ssrd=[100.0, 300.0, 50.0],
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "nwp-v2-1h-1km")
+
+        assert [e["rain_acc"] for e in result] == [0.5, 1.2, 0.3]
+        assert [e["snow_acc"] for e in result] == [2.0, 0.5, 1.8]
+        assert [e["grad"] for e in result] == [100.0, 300.0, 50.0]
 
     async def test_ensemble_model_uses_percentile_params(self):
-        """Ensemble model uses p50 percentile parameter names including grad_p50 and Tier-1 additions."""
-        payload = _make_forecast_payload(
-            ["2024-06-01T12:00:00Z"],
-            t2m_p50=[12.0],
-            mxt2m_p50=[14.0],
-            mnt2m_p50=[10.0],
-            rain_p50=[0.5],
-            snow_p50=[0.0],
-            sundur_p50=[1800.0],
-            grad_p50=[250.0],
-            snowlmt_p50=[1800.0],
-            cape_p50=[200.0],
-        )
+        """Ensemble v2 requests the _p50 variants of all NWP params except sy."""
+        payload = {"features": [{"properties": {"parameters": {}}}]}
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
-        api = GeoSphereApi(session)
 
-        result = await api.get_forecast(48.21, 16.37, "ensemble-v1-1h-2500m")
+        await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v2-1h-1km")
 
         url_called = session.get.call_args[0][0]
-        assert "t2m_p50" in url_called
-        assert "grad_p50" in url_called
-        assert "rr_p50" not in url_called
-        # Tier 1 additions are now requested for ensemble too
-        assert "cape_p50" in url_called
-        assert "snowlmt_p50" in url_called
-        assert "mxt2m_p50" in url_called
-        assert "mnt2m_p50" in url_called
-        # Normalized names
-        assert result[0]["t2m"] == 12.0
-        assert result[0]["mxt2m"] == 14.0
-        assert result[0]["mnt2m"] == 10.0
+        params = url_called.split("parameters=")[1].split("&")[0].split(",")
+        assert all(p.endswith("_p50") for p in params)
+        assert "sy_p50" not in params
+        assert {"2t_p50", "2r_p50", "10u_p50", "10fg_p50", "tcc_p50", "ssrd_p50", "msl_p50"} <= set(params)
+
+    async def test_ensemble_model_normalizes_names_and_units(self):
+        """Ensemble _p50-Namen werden auf dieselben internen Namen wie NWP abgebildet."""
+        payload = _make_forecast_payload(
+            ["2024-06-01T12:00:00Z"],
+            **{
+                "2t_p50": [12.2], "2r_p50": [53.2], "10u_p50": [5.0], "10v_p50": [-1.4],
+                "10fg_p50": [11.5], "rain_p50": [0.5], "sf_p50": [0.0], "tcc_p50": [52.5],
+                "ssrd_p50": [345.2], "snowlmt_p50": [1128.0], "cape_p50": [0.6],
+                "msl_p50": [101834.03],
+            },
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v2-1h-1km")
+
+        assert result[0]["t2m"] == 12.2
+        assert result[0]["rh2m"] == 53.2
+        assert result[0]["u10m"] == 5.0
+        assert result[0]["v10m"] == -1.4
+        assert result[0]["wind_gust_speed"] == 11.5
         assert result[0]["rain_acc"] == 0.5
         assert result[0]["snow_acc"] == 0.0
-        # grad_p50 (W/m², direkt) → grad
-        assert result[0]["grad"] == 250.0
-        # Tier 1 normalized
-        assert result[0]["snowlmt"] == 1800.0
-        assert result[0]["cape"] == 200.0
-        # tcc derived from sundur: 1 - 1800/3600 = 0.5
-        assert abs(result[0]["tcc"] - 0.5) < 1e-6
-
-    async def test_ensemble_full_sunshine_gives_zero_cloud_cover(self):
-        """sundur_p50 = 3600 s → tcc = 0.0 (clear sky)."""
-        payload = _make_forecast_payload(
-            ["2024-06-01T12:00:00Z"],
-            t2m_p50=[15.0], rain_p50=[0.0], snow_p50=[0.0], sundur_p50=[3600.0],
-        )
-        session = MagicMock()
-        session.get = MagicMock(return_value=_make_mock_response(payload))
-        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v1-1h-2500m")
-        assert result[0]["tcc"] == 0.0
-
-    async def test_ensemble_no_sunshine_gives_full_cloud_cover(self):
-        """sundur_p50 = 0 s → tcc = 1.0 (overcast)."""
-        payload = _make_forecast_payload(
-            ["2024-06-01T12:00:00Z"],
-            t2m_p50=[8.0], rain_p50=[0.0], snow_p50=[0.0], sundur_p50=[0.0],
-        )
-        session = MagicMock()
-        session.get = MagicMock(return_value=_make_mock_response(payload))
-        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v1-1h-2500m")
-        assert result[0]["tcc"] == 1.0
+        assert result[0]["tcc"] == pytest.approx(0.525)
+        assert result[0]["grad"] == 345.2
+        assert result[0]["snowlmt"] == 1128.0
+        assert result[0]["cape"] == 0.6
+        assert result[0]["pressure"] == 1018.3
+        assert "sy" not in result[0]
 
     async def test_ensemble_precip_not_deaccumulated(self):
-        """Bug 3.3: rain_p50/snow_p50 are per-period accumulations, not cumulative totals.
-
-        _deaccumulate_precip must NOT be applied to ensemble output.
-        Verify that per-period values are returned as-is, not delta-computed.
-        """
-        # Simulate three hourly values with non-monotonic per-period rainfall.
-        # If de-accumulation were applied, entry[1] would give delta(1.2-0.5)=0.7
-        # and entry[2] would clamp delta(0.3-1.2)=-0.9 → 0.0. Both are wrong.
+        """rain_p50/sf_p50 sind Intervallwerte und werden unverändert übernommen."""
         payload = _make_forecast_payload(
             ["2024-06-01T00:00:00Z", "2024-06-01T01:00:00Z", "2024-06-01T02:00:00Z"],
-            t2m_p50=[10.0, 11.0, 12.0],
             rain_p50=[0.5, 1.2, 0.3],
-            snow_p50=[0.0, 0.0, 0.0],
-            sundur_p50=[0.0, 0.0, 0.0],
+            sf_p50=[2.0, 0.5, 1.8],
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
-        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v1-1h-2500m")
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v2-1h-1km")
 
-        assert result[0]["rain_acc"] == pytest.approx(0.5)
-        assert result[1]["rain_acc"] == pytest.approx(1.2)
-        assert result[2]["rain_acc"] == pytest.approx(0.3)
+        assert [e["rain_acc"] for e in result] == [0.5, 1.2, 0.3]
+        assert [e["snow_acc"] for e in result] == [2.0, 0.5, 1.8]
 
-    async def test_ensemble_snow_not_deaccumulated(self):
-        """Bug 3.3: snow_p50 per-period accumulations are preserved without delta computation."""
+    async def test_missing_values_stay_none(self):
+        """Fehlende tcc/msl-Werte bleiben None statt einen Fehler auszulösen."""
         payload = _make_forecast_payload(
-            ["2024-06-01T00:00:00Z", "2024-06-01T01:00:00Z", "2024-06-01T02:00:00Z"],
-            t2m_p50=[0.0, -1.0, -2.0],
-            rain_p50=[0.0, 0.0, 0.0],
-            snow_p50=[2.0, 0.5, 1.8],
-            sundur_p50=[0.0, 0.0, 0.0],
+            ["2024-06-01T00:00:00Z"],
+            tcc=[None],
+            msl=[None],
         )
         session = MagicMock()
         session.get = MagicMock(return_value=_make_mock_response(payload))
-        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "ensemble-v1-1h-2500m")
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "nwp-v2-1h-1km")
 
-        assert result[0]["snow_acc"] == pytest.approx(2.0)
-        assert result[1]["snow_acc"] == pytest.approx(0.5)
-        assert result[2]["snow_acc"] == pytest.approx(1.8)
+        assert result[0]["tcc"] is None
+        assert result[0]["pressure"] is None
+        assert result[0]["t2m"] is None
+
+    async def test_retries_without_unknown_param_on_400(self):
+        """400 mit unbekanntem Parameter → zweiter Versuch ohne diesen Parameter."""
+        bad = AsyncMock()
+        bad.status = 400
+        bad.json = AsyncMock(
+            return_value={"detail": "Parameters {'cape'} do not exist or access is denied"}
+        )
+        bad.__aenter__ = AsyncMock(return_value=bad)
+        bad.__aexit__ = AsyncMock(return_value=False)
+        good = _make_mock_response(_make_forecast_payload(["2024-06-01T00:00:00Z"], **{"2t": [5.0]}))
+        good.status = 200
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=[bad, good])
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "nwp-v2-1h-1km")
+
+        second_url = session.get.call_args_list[1][0][0]
+        assert "cape" not in second_url.split("parameters=")[1].split("&")[0].split(",")
+        assert result[0]["t2m"] == 5.0
+        assert result[0]["cape"] is None
 
 
 class TestStationIdUrlEncoding:
@@ -767,146 +804,3 @@ class TestNormalizeNowcastParams:
                     "ff": 5.0, "dd": 0.0, "t2m": 10.0, "rh2m": 60.0}]
         result = GeoSphereApi._normalize_nowcast_params(entries)
         assert result[0]["wind_gust_speed"] is None
-
-
-class TestDeaccumulateGrad:
-    """Tests für die NWP-Globalstrahlungs-Deakkumulation (Ws/m² → W/m²)."""
-
-    def _entries(self, grad_values: list) -> list[dict]:
-        return [{"datetime": f"2024-06-01T{i:02d}:00:00Z", "grad": v}
-                for i, v in enumerate(grad_values)]
-
-    def test_first_entry_divided_by_3600(self):
-        """Erster Eintrag: akkumulierter Wert / 3600 = mittlere W/m²."""
-        entries = self._entries([3600.0])
-        GeoSphereApi._deaccumulate_grad(entries)
-        assert entries[0]["grad"] == pytest.approx(1.0)
-
-    def test_subsequent_entries_use_delta(self):
-        """Folgeeinträge: (current - previous) / 3600."""
-        entries = self._entries([0.0, 3600.0, 10800.0])
-        GeoSphereApi._deaccumulate_grad(entries)
-        assert entries[0]["grad"] == pytest.approx(0.0)
-        assert entries[1]["grad"] == pytest.approx(1.0)   # (3600-0)/3600
-        assert entries[2]["grad"] == pytest.approx(2.0)   # (10800-3600)/3600
-
-    def test_negative_delta_clamped_to_zero(self):
-        """Modell-Reset: negatives Delta wird auf 0 geklemmt."""
-        entries = self._entries([7200.0, 3600.0])
-        GeoSphereApi._deaccumulate_grad(entries)
-        assert entries[0]["grad"] == pytest.approx(2.0)
-        assert entries[1]["grad"] == pytest.approx(0.0)
-
-    def test_none_grad_is_left_unchanged_and_resets_accumulator(self):
-        """None-Einträge bleiben None; danach wird der Akkumulator zurückgesetzt."""
-        entries = [
-            {"datetime": "2024-06-01T00:00:00Z", "grad": 3600.0},
-            {"datetime": "2024-06-01T01:00:00Z", "grad": None},
-            {"datetime": "2024-06-01T02:00:00Z", "grad": 7200.0},
-        ]
-        GeoSphereApi._deaccumulate_grad(entries)
-        assert entries[0]["grad"] == pytest.approx(1.0)
-        assert entries[1]["grad"] is None
-        # Nach dem Reset wird der dritte Eintrag wie ein Ersteintrag behandelt
-        assert entries[2]["grad"] == pytest.approx(2.0)   # 7200/3600
-
-    def test_modifies_entries_in_place(self):
-        """_deaccumulate_grad gibt None zurück und ändert die Liste direkt."""
-        entries = self._entries([3600.0])
-        result = GeoSphereApi._deaccumulate_grad(entries)
-        assert result is None
-        assert entries[0]["grad"] == pytest.approx(1.0)
-
-    async def test_nwp_forecast_applies_deaccumulation(self):
-        """get_forecast ruft _deaccumulate_grad für NWP-Modelle auf."""
-        payload = _make_forecast_payload(
-            ["2024-06-01T06:00:00Z", "2024-06-01T07:00:00Z"],
-            t2m=[15.0, 16.0],
-            grad=[0.0, 720000.0],   # 0 Ws/m² → 200 W/m² (720000/3600=200)
-        )
-        session = MagicMock()
-        session.get = MagicMock(return_value=_make_mock_response(payload))
-        api = GeoSphereApi(session)
-
-        result = await api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
-        assert result[0]["grad"] == pytest.approx(0.0)    # 0/3600
-        assert result[1]["grad"] == pytest.approx(200.0)  # (720000-0)/3600
-
-
-class TestDeaccumulatePrecip:
-    """Tests für die NWP/Ensemble-Niederschlags-Deakkumulation (mm akkumuliert → mm/Zeitschritt)."""
-
-    def _entries(self, rain_values: list, snow_values: list | None = None) -> list[dict]:
-        if snow_values is None:
-            snow_values = [0.0] * len(rain_values)
-        return [
-            {"datetime": f"2024-06-01T{i:02d}:00:00Z", "rain_acc": r, "snow_acc": s}
-            for i, (r, s) in enumerate(zip(rain_values, snow_values))
-        ]
-
-    def test_first_entry_is_used_as_is(self):
-        """Erster Eintrag: Akkumulationswert direkt übernehmen (kein Vorgänger bekannt)."""
-        entries = self._entries([2.5])
-        GeoSphereApi._deaccumulate_precip(entries)
-        assert entries[0]["rain_acc"] == pytest.approx(2.5)
-
-    def test_subsequent_entries_use_delta(self):
-        """Folgeeinträge: Delta zum Vorgänger."""
-        entries = self._entries([0.0, 2.0, 5.0, 5.5])
-        GeoSphereApi._deaccumulate_precip(entries)
-        assert entries[0]["rain_acc"] == pytest.approx(0.0)
-        assert entries[1]["rain_acc"] == pytest.approx(2.0)   # 2.0 - 0.0
-        assert entries[2]["rain_acc"] == pytest.approx(3.0)   # 5.0 - 2.0
-        assert entries[3]["rain_acc"] == pytest.approx(0.5)   # 5.5 - 5.0
-
-    def test_negative_delta_clamped_to_zero(self):
-        """Modell-Reset: negatives Delta (Akkumulator-Reset) wird auf 0 geklemmt."""
-        entries = self._entries([5.0, 2.0])
-        GeoSphereApi._deaccumulate_precip(entries)
-        assert entries[0]["rain_acc"] == pytest.approx(5.0)
-        assert entries[1]["rain_acc"] == pytest.approx(0.0)
-
-    def test_rain_and_snow_tracked_independently(self):
-        """rain_acc und snow_acc werden unabhängig voneinander de-akkumuliert."""
-        entries = self._entries([0.0, 3.0], snow_values=[0.0, 1.5])
-        GeoSphereApi._deaccumulate_precip(entries)
-        assert entries[1]["rain_acc"] == pytest.approx(3.0)
-        assert entries[1]["snow_acc"] == pytest.approx(1.5)
-
-    def test_none_rain_acc_resets_accumulator(self):
-        """None-Einträge bleiben None; Akkumulator wird danach zurückgesetzt."""
-        entries = [
-            {"datetime": "2024-06-01T00:00:00Z", "rain_acc": 2.0, "snow_acc": 0.0},
-            {"datetime": "2024-06-01T01:00:00Z", "rain_acc": None, "snow_acc": 0.0},
-            {"datetime": "2024-06-01T02:00:00Z", "rain_acc": 4.0, "snow_acc": 0.0},
-        ]
-        GeoSphereApi._deaccumulate_precip(entries)
-        assert entries[0]["rain_acc"] == pytest.approx(2.0)
-        assert entries[1]["rain_acc"] is None
-        assert entries[2]["rain_acc"] == pytest.approx(4.0)   # wie Ersteintrag nach Reset
-
-    def test_modifies_entries_in_place(self):
-        """_deaccumulate_precip gibt None zurück und ändert die Liste direkt."""
-        entries = self._entries([1.0, 3.0])
-        result = GeoSphereApi._deaccumulate_precip(entries)
-        assert result is None
-        assert entries[1]["rain_acc"] == pytest.approx(2.0)
-
-    async def test_nwp_forecast_deaccumulates_precipitation(self):
-        """get_forecast de-akkumuliert rain_acc/snow_acc für NWP-Modelle."""
-        payload = _make_forecast_payload(
-            ["2024-06-01T06:00:00Z", "2024-06-01T07:00:00Z", "2024-06-01T08:00:00Z"],
-            t2m=[15.0, 15.0, 15.0],
-            rain_acc=[0.0, 2.0, 5.0],
-            snow_acc=[0.0, 0.0, 1.0],
-        )
-        session = MagicMock()
-        session.get = MagicMock(return_value=_make_mock_response(payload))
-        api = GeoSphereApi(session)
-
-        result = await api.get_forecast(48.21, 16.37, "nwp-v1-1h-2500m")
-        assert result[0]["rain_acc"] == pytest.approx(0.0)
-        assert result[1]["rain_acc"] == pytest.approx(2.0)   # 2.0 - 0.0
-        assert result[2]["rain_acc"] == pytest.approx(3.0)   # 5.0 - 2.0
-        assert result[2]["snow_acc"] == pytest.approx(1.0)   # 1.0 - 0.0
-

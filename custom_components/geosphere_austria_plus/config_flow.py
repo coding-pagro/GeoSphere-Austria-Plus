@@ -243,7 +243,8 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
 class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config Flow Handler."""
 
-    VERSION = 1
+    # v2: Modell-IDs nwp-/ensemble-v1 → v2 migriert (siehe __init__.async_migrate_entry)
+    VERSION = 2
     _stations: list[dict[str, Any]] | None = None
 
     @staticmethod

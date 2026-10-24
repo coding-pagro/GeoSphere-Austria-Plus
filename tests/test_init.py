@@ -443,7 +443,7 @@ class TestAsyncUnloadEntry:
 
         coordinators = {
             DATA_CURRENT: top_coord,
-            DATA_FORECASTS: {"nwp-v1-1h-2500m": nested_coord},
+            DATA_FORECASTS: {"nwp-v2-1h-1km": nested_coord},
             "_active_unique_ids": set(),  # Strings/Sets ohne _cancel_pending_retry
         }
         hass.data = {DOMAIN: {entry.entry_id: coordinators}}
@@ -462,7 +462,7 @@ class TestDeprecationIssue:
         entry = _make_entry(data={
             CONF_LATITUDE: 48.21,
             CONF_LONGITUDE: 16.37,
-            CONF_FORECAST_MODEL: "nwp-v1-1h-2500m",  # legacy key, no forecast_models
+            CONF_FORECAST_MODEL: "nwp-v2-1h-1km",  # legacy key, no forecast_models
         })
         hass = _make_hass()
 
@@ -535,3 +535,92 @@ class TestActiveUniqueIdsCleanup:
         # Beim forward_entry_setups-Aufruf MUSS der Key bereits vorhanden sein.
         assert "_active_unique_ids" in captured["coords"]
         assert isinstance(captured["coords"]["_active_unique_ids"], set)
+
+
+class TestAsyncMigrateEntry:
+    """v1 → v2: eingestellte GeoSphere-Modelle (04.11.2026) auf Nachfolger umstellen."""
+
+    async def _migrate(self, entry):
+        hass = _make_hass()
+        with patch(f"{_PATCH_BASE}.er") as mock_er:
+            mock_er.async_migrate_entries = AsyncMock()
+            from custom_components.geosphere_austria_plus import async_migrate_entry
+            result = await async_migrate_entry(hass, entry)
+        return result, hass, mock_er
+
+    def _v1_entry(self, data=None, options=None):
+        entry = _make_entry(data=data, options=options)
+        entry.version = 1
+        return entry
+
+    async def test_migrates_model_ids_in_data_and_options(self):
+        entry = self._v1_entry(
+            data={**_BASE_DATA, CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m", "nowcast-v1-15min-1km"]},
+            options={CONF_FORECAST_MODELS: ["ensemble-v1-1h-2500m", "nwp-v1-1h-2500m"]},
+        )
+        result, hass, _ = await self._migrate(entry)
+
+        assert result is True
+        kwargs = hass.config_entries.async_update_entry.call_args.kwargs
+        assert kwargs["version"] == 2
+        assert kwargs["data"][CONF_FORECAST_MODELS] == ["nwp-v2-1h-1km", "nowcast-v1-15min-1km"]
+        assert kwargs["options"][CONF_FORECAST_MODELS] == ["ensemble-v2-1h-1km", "nwp-v2-1h-1km"]
+        # Übrige Felder bleiben erhalten
+        assert kwargs["data"][CONF_LATITUDE] == 48.21
+
+    async def test_migrates_legacy_single_model_key(self):
+        entry = self._v1_entry(data={CONF_LATITUDE: 48.21, CONF_LONGITUDE: 16.37,
+                                     CONF_FORECAST_MODEL: "ensemble-v1-1h-2500m"})
+        _, hass, _ = await self._migrate(entry)
+
+        kwargs = hass.config_entries.async_update_entry.call_args.kwargs
+        assert kwargs["data"][CONF_FORECAST_MODEL] == "ensemble-v2-1h-1km"
+        assert CONF_FORECAST_MODELS not in kwargs["data"]
+        assert kwargs["options"] == {}
+
+    async def test_deduplicates_after_mapping(self):
+        entry = self._v1_entry(
+            data={**_BASE_DATA, CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m", "nwp-v2-1h-1km"]},
+        )
+        _, hass, _ = await self._migrate(entry)
+
+        kwargs = hass.config_entries.async_update_entry.call_args.kwargs
+        assert kwargs["data"][CONF_FORECAST_MODELS] == ["nwp-v2-1h-1km"]
+
+    async def test_migrates_weather_entity_unique_ids(self):
+        entry = self._v1_entry(data=_BASE_DATA)
+        _, _, mock_er = await self._migrate(entry)
+
+        mock_er.async_migrate_entries.assert_awaited_once()
+        _hass, entry_id, migrate = mock_er.async_migrate_entries.call_args.args
+        assert entry_id == "test_entry_id"
+
+        def reg(unique_id):
+            return MagicMock(unique_id=unique_id)
+
+        assert migrate(reg("geosphere_plus_test_entry_id_nwp-v1-1h-2500m")) == {
+            "new_unique_id": "geosphere_plus_test_entry_id_nwp-v2-1h-1km"
+        }
+        assert migrate(reg("geosphere_plus_test_entry_id_ensemble-v1-1h-2500m")) == {
+            "new_unique_id": "geosphere_plus_test_entry_id_ensemble-v2-1h-1km"
+        }
+        # Nowcast und Sensoren bleiben unverändert
+        assert migrate(reg("geosphere_plus_test_entry_id_nowcast-v1-15min-1km")) is None
+        assert migrate(reg("geosphere_plus_test_entry_id_TL")) is None
+
+    async def test_current_version_is_noop(self):
+        entry = _make_entry(data=_BASE_DATA)
+        entry.version = 2
+        result, hass, mock_er = await self._migrate(entry)
+
+        assert result is True
+        hass.config_entries.async_update_entry.assert_not_called()
+        mock_er.async_migrate_entries.assert_not_called()
+
+    async def test_downgrade_from_future_version_fails(self):
+        entry = _make_entry(data=_BASE_DATA)
+        entry.version = 3
+        result, hass, _ = await self._migrate(entry)
+
+        assert result is False
+        hass.config_entries.async_update_entry.assert_not_called()
