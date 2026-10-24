@@ -29,7 +29,7 @@ _BASE_USER_INPUT = {
     CONF_LATITUDE: _DEFAULT_LAT,
     CONF_LONGITUDE: _DEFAULT_LON,
     CONF_STATION_ID: "",
-    CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m"],
+    CONF_FORECAST_MODELS: ["nwp-v2-1h-1km"],
 }
 
 
@@ -69,7 +69,7 @@ class TestOptionsFlowInit:
         assert result["step_id"] == "init"
 
     async def test_creates_entry_with_selected_models(self):
-        models = ["nwp-v1-1h-2500m", "ensemble-v1-1h-2500m"]
+        models = ["nwp-v2-1h-1km", "ensemble-v2-1h-1km"]
         result = await _call(
             _FakeOptionsFlow(),
             user_input={**_BASE_USER_INPUT, CONF_FORECAST_MODELS: models},
@@ -98,11 +98,11 @@ class TestOptionsFlowInit:
             _FakeOptionsFlow(),
             user_input={
                 **_BASE_USER_INPUT,
-                CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m", "invalid-model"],
+                CONF_FORECAST_MODELS: ["nwp-v2-1h-1km", "invalid-model"],
             },
         )
         assert result["type"] == "create_entry"
-        assert result["data"][CONF_FORECAST_MODELS] == ["nwp-v1-1h-2500m"]
+        assert result["data"][CONF_FORECAST_MODELS] == ["nwp-v2-1h-1km"]
 
     async def test_coordinates_stored_in_options(self):
         result = await _call(
@@ -141,7 +141,7 @@ class TestOptionsFlowInit:
 
     async def test_reads_current_values_from_options(self):
         fake = _FakeOptionsFlow(
-            options={CONF_FORECAST_MODELS: ["ensemble-v1-1h-2500m"], CONF_LATITUDE: 47.0, CONF_LONGITUDE: 15.0}
+            options={CONF_FORECAST_MODELS: ["ensemble-v2-1h-1km"], CONF_LATITUDE: 47.0, CONF_LONGITUDE: 15.0}
         )
         result = await _call(fake, user_input=None)
         assert result["type"] == "form"
@@ -294,7 +294,7 @@ class TestConfigFlowUserStep:
         assert result["title"] == _DEFAULT_NAME
         assert result["data"][CONF_LATITUDE] == _DEFAULT_LAT
         assert result["data"][CONF_LONGITUDE] == _DEFAULT_LON
-        assert result["data"][CONF_FORECAST_MODELS] == ["nwp-v1-1h-2500m"]
+        assert result["data"][CONF_FORECAST_MODELS] == ["nwp-v2-1h-1km"]
 
     async def test_station_optional_empty_means_none(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
@@ -431,11 +431,11 @@ class TestReconfigureFlow:
             fake,
             user_input={
                 **_BASE_USER_INPUT,
-                CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m", "bad-model"],
+                CONF_FORECAST_MODELS: ["nwp-v2-1h-1km", "bad-model"],
             },
         )
         assert result["type"] == "create_entry"
-        assert result["data"][CONF_FORECAST_MODELS] == ["nwp-v1-1h-2500m"]
+        assert result["data"][CONF_FORECAST_MODELS] == ["nwp-v2-1h-1km"]
 
     async def test_user_coordinates_stored(self):
         """Koordinaten kommen aus der Nutzereingabe, nicht aus der Station."""
@@ -649,7 +649,7 @@ class TestSchemaConstruction:
         flow = _make_real_flow(stations=[_VALID_STATION])
         schema = flow._schema_from_defaults(
             "Wien", 48.21, 16.37, "11035",
-            ["nwp-v1-1h-2500m"],
+            ["nwp-v2-1h-1km"],
             True, True, False, 5,
         )
         assert schema is not None
@@ -659,7 +659,7 @@ class TestSchemaConstruction:
         flow = _make_real_flow(stations=[])
         schema = flow._schema_from_defaults(
             "Wien", 48.21, 16.37, "",
-            ["nwp-v1-1h-2500m"],
+            ["nwp-v2-1h-1km"],
             True, True, False, 5,
         )
         assert schema is not None
@@ -671,7 +671,7 @@ class TestSchemaConstruction:
         entry.title = "Wien"
         entry.data = {
             CONF_LATITUDE: 47.0, CONF_LONGITUDE: 13.0,
-            CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m"],
+            CONF_FORECAST_MODELS: ["nwp-v2-1h-1km"],
         }
         entry.options = {
             CONF_LATITUDE: 48.21, CONF_LONGITUDE: 16.37,
@@ -687,7 +687,7 @@ class TestSchemaConstruction:
         entry.title = "Wien"
         entry.data = {
             CONF_LATITUDE: 47.0, CONF_LONGITUDE: 13.0,
-            CONF_FORECAST_MODELS: ["nwp-v1-1h-2500m"],
+            CONF_FORECAST_MODELS: ["nwp-v2-1h-1km"],
         }
         entry.options = {}
         schema = flow._build_schema_with_defaults(entry)

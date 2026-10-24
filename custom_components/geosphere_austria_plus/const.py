@@ -67,51 +67,67 @@ TAWES_RESOURCE = "tawes-v1-10min"
 TAWES_PARAMS = "TL,TP,RF,DD,FF,FX,P,PRED,RR,SO,SH,GLOW,TB1"
 
 # Vorhersagemodelle (gültige IDs – Bezeichnungen in den Übersetzungsdateien)
+# NWP und Ensemble basieren seit v2 auf C-LAEF AlpeAdria (1 km, Läufe alle 3 h).
 FORECAST_MODELS = [
-    "nwp-v1-1h-2500m",
-    "ensemble-v1-1h-2500m",
+    "nwp-v2-1h-1km",
+    "ensemble-v2-1h-1km",
     "nowcast-v1-15min-1km",
 ]
-DEFAULT_FORECAST_MODEL = "nwp-v1-1h-2500m"
+DEFAULT_FORECAST_MODEL = "nwp-v2-1h-1km"
 
 FORECAST_MODEL_LABELS = {
-    "nwp-v1-1h-2500m":       "NWP",
-    "ensemble-v1-1h-2500m":  "Ensemble",
+    "nwp-v2-1h-1km":         "NWP",
+    "ensemble-v2-1h-1km":    "Ensemble",
     "nowcast-v1-15min-1km":  "Nowcast",
 }
 
-# Vorhersageparameter (NWP / Nowcast)
-# - mxt2m/mnt2m: Max/Min-Temperatur je Forecast-Periode (genauer als min/max(t2m))
+# Von GeoSphere am 04.11.2026 eingestellte Modelle → Nachfolger.
+# Wird von async_migrate_entry für bestehende Config-Einträge und
+# Weather-Entity-Unique-IDs verwendet.
+LEGACY_FORECAST_MODEL_MAP = {
+    "nwp-v1-1h-2500m":       "nwp-v2-1h-1km",
+    "ensemble-v1-1h-2500m":  "ensemble-v2-1h-1km",
+}
+
+# Normalisierung: v2-Parameternamen → interne Namen
+# Ermöglicht identische Verarbeitung aller Modelle in weather.py.
+# Alle v2-Werte gelten für das zurückliegende Intervall bzw. den Zeitpunkt —
+# es gibt keine Akkumulation seit Modellstart mehr, daher keine De-Akkumulation.
+# - 10fg: skalare Max-Böe im Intervall (m/s)
+# - rain/sf: Niederschlag im Intervall (kg/m² ≈ mm)
+# - tcc: Wolkenbedeckung in % → api.py rechnet auf Anteil 0–1 um
+# - ssrd: Globalstrahlung als Intervallmittel (W/m²)
+# - msl: Luftdruck auf Meeresniveau in Pa → api.py rechnet auf hPa um
 # - snowlmt: Schneefallgrenze (m) — hochrelevant für österreichisches Bergland
 # - cape: Convective Available Potential Energy (m²/s²) — quantitatives Gewitterpotenzial
-NWP_PARAMS = "t2m,mxt2m,mnt2m,rh2m,u10m,v10m,ugust,vgust,rain_acc,snow_acc,tcc,grad,sy,snowlmt,cape"
-NOWCAST_PARAMS = "t2m,rh2m,ff,dd,fx,rr,pt"
-
-# Vorhersageparameter (Ensemble – Median-Perzentile, andere Namenskonvention)
-# Hinweis: rh2m ist im Ensemble-Modell nicht verfügbar → humidity immer None.
-ENSEMBLE_PARAMS = "t2m_p50,mxt2m_p50,mnt2m_p50,rain_p50,snow_p50,sundur_p50,grad_p50,snowlmt_p50,cape_p50"
-
-# Normalisierung: Ensemble-Parameternamen → NWP-Parameternamen
-# Ermöglicht identische Verarbeitung in weather.py
-# Hinweis:
-# - grad_p50 ist ein Momentanwert (W/m², instantaneous flux)
-# - rain_p50, snow_p50 sind Periodensummen (mm/Periode, 1h Fenster),
-#   keine Akkumulationen seit Modellstart wie NWP rain_acc/snow_acc
-# - snowlmt_p50, cape_p50 sind Momentanwerte (m bzw. m²/s²) → identisches Format
-# - mxt2m_p50/mnt2m_p50 sind Tages-/Periodenextreme (°C) → identisches Format
-# NWP grad (Ws/m²) wird in api.py per Delta/3600 in W/m² umgerechnet –
-# danach identisches Format für grad.
-ENSEMBLE_PARAM_MAP = {
-    "t2m_p50":     "t2m",
-    "mxt2m_p50":   "mxt2m",
-    "mnt2m_p50":   "mnt2m",
-    "rain_p50":    "rain_acc",
-    "snow_p50":    "snow_acc",
-    "sundur_p50":  "sundur",
-    "grad_p50":    "grad",
-    "snowlmt_p50": "snowlmt",
-    "cape_p50":    "cape",
+NWP_PARAM_MAP = {
+    "2t":      "t2m",
+    "2r":      "rh2m",
+    "10u":     "u10m",
+    "10v":     "v10m",
+    "10fg":    "wind_gust_speed",
+    "rain":    "rain_acc",
+    "sf":      "snow_acc",
+    "tcc":     "tcc",
+    "ssrd":    "grad",
+    "sy":      "sy",
+    "snowlmt": "snowlmt",
+    "cape":    "cape",
+    "msl":     "pressure",
 }
+NWP_PARAMS = ",".join(NWP_PARAM_MAP)
+
+# Ensemble: Median-Perzentil (_p50) derselben Größen. Das Ensemble liefert
+# kein Wettersymbol (sy).
+ENSEMBLE_PARAM_MAP = {
+    f"{name}_p50": internal
+    for name, internal in NWP_PARAM_MAP.items()
+    if name != "sy"
+}
+ENSEMBLE_PARAMS = ",".join(ENSEMBLE_PARAM_MAP)
+
+# Vorhersageparameter (Nowcast)
+NOWCAST_PARAMS = "t2m,rh2m,ff,dd,fx,rr,pt"
 
 # Open-Meteo (daily forecast tail extension)
 CONF_ENABLE_OPEN_METEO = "enable_open_meteo"

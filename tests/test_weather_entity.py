@@ -32,7 +32,7 @@ def entity(current_coord, forecast_coord):
         current_coordinator=current_coord,
         forecast_coordinator=forecast_coord,
         entry_id="test_entry",
-        model="nwp-v1-1h-2500m",
+        model="nwp-v2-1h-1km",
         location_name="WIEN HOHE WARTE",
         lon=16.37,
     )
@@ -65,7 +65,7 @@ def _future_entry(hours_ahead: int = 2, **overrides) -> dict:
 
 class TestEntityMetadata:
     def test_unique_id(self, entity):
-        assert entity._attr_unique_id == "geosphere_plus_test_entry_nwp-v1-1h-2500m"
+        assert entity._attr_unique_id == "geosphere_plus_test_entry_nwp-v2-1h-1km"
 
     def test_name(self, entity):
         assert entity._attr_name == "NWP"
@@ -225,7 +225,7 @@ class TestForecastFallbackProperties:
             current_coordinator=None,
             forecast_coordinator=forecast_coord,
             entry_id="test_entry",
-            model="nwp-v1-1h-2500m",
+            model="nwp-v2-1h-1km",
             location_name="Test",
             lon=16.37,
         )
@@ -282,18 +282,38 @@ class TestForecastFallbackProperties:
         assert no_station_entity.humidity is None
         assert no_station_entity.native_wind_speed is None
 
-    def test_pressure_always_none_without_station(self, no_station_entity, forecast_coord):
-        """Luftdruck hat kein Forecast-Äquivalent."""
+    def test_pressure_from_forecast(self, no_station_entity, forecast_coord):
+        """v2-Modelle liefern msl → pressure (hPa)."""
+        self._set_forecast(forecast_coord, pressure=1017.9)
+        assert no_station_entity.native_pressure == pytest.approx(1017.9)
+
+    def test_pressure_none_when_forecast_lacks_it(self, no_station_entity, forecast_coord):
+        """Nowcast liefert keinen Luftdruck."""
         self._set_forecast(forecast_coord)
         assert no_station_entity.native_pressure is None
+
+    def test_station_pressure_preferred_over_forecast(self, current_coord, forecast_coord):
+        entity = GeoSphereWeatherEntity(
+            current_coordinator=current_coord,
+            forecast_coordinator=forecast_coord,
+            entry_id="x", model="nwp-v2-1h-1km",
+            location_name="Test", lon=16.0,
+        )
+        current_coord.data = {"PRED": 1005.0}
+        self._set_forecast(forecast_coord, pressure=1017.9)
+        assert entity.native_pressure == 1005.0
 
     def test_dew_point_always_none_without_station(self, no_station_entity, forecast_coord):
         """Taupunkt hat kein Forecast-Äquivalent."""
         self._set_forecast(forecast_coord)
         assert no_station_entity.native_dew_point is None
 
-    def test_wind_gust_always_none_without_station(self, no_station_entity, forecast_coord):
-        """Böen haben kein Forecast-Äquivalent."""
+    def test_wind_gust_from_forecast(self, no_station_entity, forecast_coord):
+        """v2-Modelle liefern 10fg, Nowcast fx → wind_gust_speed."""
+        self._set_forecast(forecast_coord, wind_gust_speed=11.5)
+        assert no_station_entity.native_wind_gust_speed == pytest.approx(11.5)
+
+    def test_wind_gust_none_when_forecast_lacks_it(self, no_station_entity, forecast_coord):
         self._set_forecast(forecast_coord)
         assert no_station_entity.native_wind_gust_speed is None
 
@@ -894,25 +914,11 @@ class TestBuildDailyForecasts:
         assert forecasts[0].condition != "lightning-rainy"
 
     # ------------------------------------------------------------------
-    # Tier 1: native mxt2m/mnt2m for daily extremes
+    # Daily extremes and pressure
     # ------------------------------------------------------------------
 
-    def test_daily_uses_native_mxt2m_when_available(self, entity, current_coord, forecast_coord):
-        """When mxt2m is provided, it overrides max(t2m) for native_temperature."""
-        current_coord.data = {}
-        # t2m sequence peaks at 11.5, but model knows the true peak was 13.0
-        entries = self._day_entries(day_offset=1, count=4)
-        for e in entries:
-            e["mxt2m"] = 13.0
-            e["mnt2m"] = 8.5
-        forecast_coord.data = entries
-
-        forecasts = entity._build_daily_forecasts()
-        assert forecasts[0].native_temperature == pytest.approx(13.0)
-        assert forecasts[0].native_templow == pytest.approx(8.5)
-
-    def test_daily_falls_back_to_t2m_when_mxt2m_missing(self, entity, current_coord, forecast_coord):
-        """Without mxt2m/mnt2m, daily extremes fall back to min/max of hourly t2m."""
+    def test_daily_extremes_from_hourly_t2m(self, entity, current_coord, forecast_coord):
+        """Daily extremes are min/max of hourly t2m (v2 models provide no mxt2m/mnt2m)."""
         current_coord.data = {}
         entries = self._day_entries(day_offset=1, count=4)  # t2m: 10.0, 10.5, 11.0, 11.5
         forecast_coord.data = entries
@@ -921,17 +927,23 @@ class TestBuildDailyForecasts:
         assert forecasts[0].native_temperature == pytest.approx(11.5)
         assert forecasts[0].native_templow == pytest.approx(10.0)
 
-    def test_daily_uses_max_of_mxt2m_across_hours(self, entity, current_coord, forecast_coord):
-        """mxt2m varies across hours — daily peak is the maximum across the day."""
+    def test_daily_pressure_is_mean_of_day(self, entity, current_coord, forecast_coord):
+        """native_pressure is the daily mean of the hourly pressure values."""
         current_coord.data = {}
         entries = self._day_entries(day_offset=1, count=4)
-        for i, mx in enumerate([12.0, 15.0, 14.0, 13.0]):
-            entries[i]["mxt2m"] = mx
-            entries[i]["mnt2m"] = 5.0  # constant, only mx varies
+        for e, p in zip(entries, [1010.0, 1012.0, 1014.0, None]):
+            e["pressure"] = p
         forecast_coord.data = entries
 
         forecasts = entity._build_daily_forecasts()
-        assert forecasts[0].native_temperature == pytest.approx(15.0)
+        assert forecasts[0].native_pressure == pytest.approx(1012.0)
+
+    def test_daily_pressure_none_without_data(self, entity, current_coord, forecast_coord):
+        current_coord.data = {}
+        forecast_coord.data = self._day_entries(day_offset=1, count=4)
+
+        forecasts = entity._build_daily_forecasts()
+        assert forecasts[0].native_pressure is None
 
     # ------------------------------------------------------------------
     # Tier 1: snowlmt and cape daily aggregation
@@ -1007,10 +1019,27 @@ class TestBuildDailyForecastsEnsemble:
             current_coordinator=current_coord,
             forecast_coordinator=forecast_coord,
             entry_id="ens_entry",
-            model="ensemble-v1-1h-2500m",
+            model="ensemble-v2-1h-1km",
             location_name="Test",
             lon=16.0,
         )
+
+    def test_daily_condition_uses_daytime_cloud_cover(
+        self, ensemble_entity, current_coord, forecast_coord
+    ):
+        """Overcast daytime with clear nights → 'cloudy', not the all-day average.
+
+        lon=16 → daytime are UTC hours 5–19. All-day mean tcc = 15/24 = 0.625
+        (partlycloudy), daytime mean = 1.0 (cloudy).
+        """
+        current_coord.data = {}
+        entries = self._ensemble_day_entries(1, [0.0] * 24)
+        for i, e in enumerate(entries):
+            e["tcc"] = 1.0 if 5 <= i <= 19 else 0.0
+        forecast_coord.data = entries
+
+        forecasts = ensemble_entity._build_daily_forecasts()
+        assert forecasts[0].condition == "cloudy"
 
     def _ensemble_day_entries(
         self,
@@ -1121,53 +1150,58 @@ class TestBuildDailyForecastsEnsemble:
 
 
 # ---------------------------------------------------------------------------
-# Wind gust in hourly forecasts (ugust/vgust → native_wind_gust_speed)
+# Wind gust and pressure in hourly forecasts
 # ---------------------------------------------------------------------------
 
 class TestHourlyForecastWindGust:
-    def test_wind_gust_calculated_from_components(self, entity, current_coord, forecast_coord):
-        """ugust=3, vgust=4 → wind_gust_speed = sqrt(9+16) = 5."""
+    def test_wind_gust_from_scalar(self, entity, current_coord, forecast_coord):
+        """NWP/Ensemble v2: 10fg is normalized to the scalar wind_gust_speed."""
         current_coord.data = {}
-        forecast_coord.data = [_future_entry(ugust=3.0, vgust=4.0)]
+        forecast_coord.data = [_future_entry(wind_gust_speed=11.5)]
 
         forecasts = entity._build_hourly_forecasts()
         assert len(forecasts) == 1
-        assert forecasts[0].native_wind_gust_speed == pytest.approx(5.0)
+        assert forecasts[0].native_wind_gust_speed == pytest.approx(11.5)
 
-    def test_wind_gust_none_when_components_absent(self, entity, current_coord, forecast_coord):
-        """No ugust/vgust in entry → native_wind_gust_speed is None."""
+    def test_wind_gust_none_when_absent(self, entity, current_coord, forecast_coord):
+        """No wind_gust_speed in entry → native_wind_gust_speed is None."""
         current_coord.data = {}
         forecast_coord.data = [_future_entry()]  # no gust keys
 
         forecasts = entity._build_hourly_forecasts()
         assert forecasts[0].native_wind_gust_speed is None
 
-    def test_wind_gust_none_when_only_one_component_present(
-        self, entity, current_coord, forecast_coord
-    ):
-        """Both components must be present; a single one is not enough."""
+    def test_wind_gust_zero_is_kept(self, entity, current_coord, forecast_coord):
+        """A gust of 0 m/s is a valid value, not missing data."""
         current_coord.data = {}
-        forecast_coord.data = [_future_entry(ugust=5.0)]  # vgust missing
-
-        forecasts = entity._build_hourly_forecasts()
-        assert forecasts[0].native_wind_gust_speed is None
-
-    def test_wind_gust_zero_components_gives_zero(self, entity, current_coord, forecast_coord):
-        """ugust=0, vgust=0 → wind_gust_speed = 0."""
-        current_coord.data = {}
-        forecast_coord.data = [_future_entry(ugust=0.0, vgust=0.0)]
+        forecast_coord.data = [_future_entry(wind_gust_speed=0.0)]
 
         forecasts = entity._build_hourly_forecasts()
         assert forecasts[0].native_wind_gust_speed == pytest.approx(0.0)
 
     def test_wind_gust_independent_of_wind_speed(self, entity, current_coord, forecast_coord):
-        """Gust and mean wind are calculated from separate component pairs."""
+        """Mean wind comes from u10m/v10m, gust from its own scalar."""
         current_coord.data = {}
-        forecast_coord.data = [_future_entry(u10m=1.0, v10m=0.0, ugust=0.0, vgust=6.0)]
+        forecast_coord.data = [_future_entry(u10m=1.0, v10m=0.0, wind_gust_speed=6.0)]
 
         forecasts = entity._build_hourly_forecasts()
         assert forecasts[0].native_wind_speed == pytest.approx(1.0)
         assert forecasts[0].native_wind_gust_speed == pytest.approx(6.0)
+
+    def test_hourly_pressure(self, entity, current_coord, forecast_coord):
+        """pressure (hPa, normalized from msl) → native_pressure."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(pressure=1017.9)]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0].native_pressure == pytest.approx(1017.9)
+
+    def test_hourly_pressure_none_when_absent(self, entity, current_coord, forecast_coord):
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry()]
+
+        forecasts = entity._build_hourly_forecasts()
+        assert forecasts[0].native_pressure is None
 
     def test_wind_gust_from_nowcast_fx(self, current_coord, forecast_coord):
         """Nowcast: fx is mapped to wind_gust_speed directly (scalar, no components)."""
@@ -1209,19 +1243,16 @@ class TestHourlyForecastWindGust:
 
 class TestDailyForecastWindGust:
     def _day_entries_with_gust(
-        self, day_offset: int, gusts: list[tuple[float, float]]
+        self, day_offset: int, gusts: list[float | None]
     ) -> list:
-        """Build hourly entries with explicit ugust/vgust pairs.
-
-        gusts is a list of (ugust, vgust) tuples, one per entry.
-        """
+        """Build hourly entries with explicit scalar gusts (None → key omitted)."""
         base_dt = (
             datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             + timedelta(days=day_offset)
         )
         entries = []
-        for i, (ug, vg) in enumerate(gusts):
-            entries.append({
+        for i, gust in enumerate(gusts):
+            entry = {
                 "datetime": (base_dt + timedelta(hours=i)).isoformat(),
                 "t2m": 10.0,
                 "rain_acc": 0.0,
@@ -1230,25 +1261,23 @@ class TestDailyForecastWindGust:
                 "u10m": 1.0,
                 "v10m": 0.0,
                 "tcc": 0.3,
-                "ugust": ug,
-                "vgust": vg,
-            })
+            }
+            if gust is not None:
+                entry["wind_gust_speed"] = gust
+            entries.append(entry)
         return entries
 
     def test_daily_gust_is_max_over_day(self, entity, current_coord, forecast_coord):
         """Daily wind_gust_speed is the maximum scalar gust across all hourly entries."""
         current_coord.data = {}
-        # Gusts: sqrt(3²+4²)=5, sqrt(0²+8²)=8, sqrt(6²+0²)=6
-        forecast_coord.data = self._day_entries_with_gust(
-            1, [(3.0, 4.0), (0.0, 8.0), (6.0, 0.0)]
-        )
+        forecast_coord.data = self._day_entries_with_gust(1, [5.0, 8.0, 6.0])
 
         forecasts = entity._build_daily_forecasts()
         assert len(forecasts) == 1
         assert forecasts[0].native_wind_gust_speed == pytest.approx(8.0)
 
-    def test_daily_gust_none_when_no_gust_components(self, entity, current_coord, forecast_coord):
-        """native_wind_gust_speed is None for a day with no ugust/vgust data."""
+    def test_daily_gust_none_when_no_gust_data(self, entity, current_coord, forecast_coord):
+        """native_wind_gust_speed is None for a day without any gust values."""
         current_coord.data = {}
         base_dt = (
             datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1272,42 +1301,12 @@ class TestDailyForecastWindGust:
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].native_wind_gust_speed is None
 
-    def test_daily_gust_skips_entries_with_missing_components(
+    def test_daily_gust_skips_entries_without_gust(
         self, entity, current_coord, forecast_coord
     ):
-        """Entries that lack ugust or vgust are excluded from the gust aggregation."""
+        """Entries without a gust value are excluded from the gust aggregation."""
         current_coord.data = {}
-        base_dt = (
-            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            + timedelta(days=1)
-        )
-        # First entry has no gust; second has ugust=5/vgust=0 → gust=5
-        entries = [
-            {
-                "datetime": (base_dt).isoformat(),
-                "t2m": 10.0,
-                "rain_acc": 0.0,
-                "snow_acc": 0.0,
-                "rh2m": 65.0,
-                "u10m": 1.0,
-                "v10m": 0.0,
-                "tcc": 0.3,
-                # no ugust/vgust
-            },
-            {
-                "datetime": (base_dt + timedelta(hours=1)).isoformat(),
-                "t2m": 10.0,
-                "rain_acc": 0.0,
-                "snow_acc": 0.0,
-                "rh2m": 65.0,
-                "u10m": 1.0,
-                "v10m": 0.0,
-                "tcc": 0.3,
-                "ugust": 5.0,
-                "vgust": 0.0,
-            },
-        ]
-        forecast_coord.data = entries
+        forecast_coord.data = self._day_entries_with_gust(1, [None, 5.0])
 
         forecasts = entity._build_daily_forecasts()
         assert forecasts[0].native_wind_gust_speed == pytest.approx(5.0)
@@ -1445,19 +1444,19 @@ def _make_entity(model: str, current_coord, forecast_coord):
 class TestSupportedFeatures:
     def test_nwp_and_ensemble_have_same_features(self, current_coord, forecast_coord):
         """NWP und Ensemble bieten beide stündliche und tägliche Vorhersagen."""
-        nwp = _make_entity("nwp-v1-1h-2500m", current_coord, forecast_coord)
-        ensemble = _make_entity("ensemble-v1-1h-2500m", current_coord, forecast_coord)
+        nwp = _make_entity("nwp-v2-1h-1km", current_coord, forecast_coord)
+        ensemble = _make_entity("ensemble-v2-1h-1km", current_coord, forecast_coord)
         assert nwp.supported_features == ensemble.supported_features
 
     def test_nowcast_has_fewer_features_than_nwp(self, current_coord, forecast_coord):
         """Nowcast bietet nur stündliche Vorhersagen (kein Daily)."""
-        nwp = _make_entity("nwp-v1-1h-2500m", current_coord, forecast_coord)
+        nwp = _make_entity("nwp-v2-1h-1km", current_coord, forecast_coord)
         nowcast = _make_entity("nowcast-v1-15min-1km", current_coord, forecast_coord)
         assert nowcast.supported_features != nwp.supported_features
 
     def test_nowcast_features_are_subset_of_nwp(self, current_coord, forecast_coord):
         """Alle Nowcast-Features sind in NWP enthalten (Nowcast ⊂ NWP)."""
-        nwp = _make_entity("nwp-v1-1h-2500m", current_coord, forecast_coord)
+        nwp = _make_entity("nwp-v2-1h-1km", current_coord, forecast_coord)
         nowcast = _make_entity("nowcast-v1-15min-1km", current_coord, forecast_coord)
         assert (nwp.supported_features & nowcast.supported_features) == nowcast.supported_features
 
@@ -1556,7 +1555,7 @@ class TestResolveTccForNowcast:
             _nwp_entry_with_tcc(1, 0.2),
             _nwp_entry_with_tcc(2, 0.9),
         ]
-        entity = _nowcast_entity(None, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        entity = _nowcast_entity(None, MagicMock(), {"nwp-v2-1h-1km": nwp_coord})
         dt = datetime.now(timezone.utc) + timedelta(minutes=50)  # closer to +1h
         result = entity._resolve_tcc_for_nowcast(dt)
         assert result == pytest.approx(0.2)
@@ -1568,7 +1567,7 @@ class TestResolveTccForNowcast:
             _nwp_entry_with_tcc(1, 0.1),
             _nwp_entry_with_tcc(2, 0.8),
         ]
-        entity = _nowcast_entity(None, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        entity = _nowcast_entity(None, MagicMock(), {"nwp-v2-1h-1km": nwp_coord})
         dt = datetime.now(timezone.utc) + timedelta(minutes=90)  # exactly between → +2h wins
         result = entity._resolve_tcc_for_nowcast(dt)
         assert result in (pytest.approx(0.1), pytest.approx(0.8))  # either is valid for tie
@@ -1577,7 +1576,7 @@ class TestResolveTccForNowcast:
         """NWP coordinator exists but has no data → falls back to None."""
         nwp_coord = MagicMock()
         nwp_coord.data = None
-        entity = _nowcast_entity(None, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        entity = _nowcast_entity(None, MagicMock(), {"nwp-v2-1h-1km": nwp_coord})
         result = entity._resolve_tcc_for_nowcast(
             datetime.now(timezone.utc) + timedelta(minutes=30)
         )
@@ -1591,7 +1590,7 @@ class TestResolveTccForNowcast:
         current.data = {"SO": 0}  # tcc_tawes = 1.0
         nwp_coord = MagicMock()
         nwp_coord.data = [_nwp_entry_with_tcc(0, 0.0)]  # tcc_nwp = 0.0
-        entity = _nowcast_entity(current, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        entity = _nowcast_entity(current, MagicMock(), {"nwp-v2-1h-1km": nwp_coord})
         result = entity._resolve_tcc_for_nowcast(datetime.now(timezone.utc))
         assert result == pytest.approx(1.0, abs=0.05)  # close to TAWES at t=0
 
@@ -1601,7 +1600,7 @@ class TestResolveTccForNowcast:
         current.data = {"SO": 0}  # tcc_tawes = 1.0
         nwp_coord = MagicMock()
         nwp_coord.data = [_nwp_entry_with_tcc(3, 0.2)]  # tcc_nwp = 0.2
-        entity = _nowcast_entity(current, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        entity = _nowcast_entity(current, MagicMock(), {"nwp-v2-1h-1km": nwp_coord})
         dt = datetime.now(timezone.utc) + timedelta(hours=3)
         result = entity._resolve_tcc_for_nowcast(dt)
         assert result == pytest.approx(0.2, abs=0.05)  # close to NWP at t=3h
@@ -1612,7 +1611,7 @@ class TestResolveTccForNowcast:
         current.data = {"SO": 0}   # tcc_tawes = 1.0
         nwp_coord = MagicMock()
         nwp_coord.data = [_nwp_entry_with_tcc(2, 0.0)]  # tcc_nwp = 0.0
-        entity = _nowcast_entity(current, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        entity = _nowcast_entity(current, MagicMock(), {"nwp-v2-1h-1km": nwp_coord})
         dt = datetime.now(timezone.utc) + timedelta(hours=1, minutes=30)
         result = entity._resolve_tcc_for_nowcast(dt)
         assert result == pytest.approx(0.5, abs=0.05)
@@ -1623,7 +1622,7 @@ class TestResolveTccForNowcast:
         current.data = {"SO": 600}  # tcc_tawes = 0.0 (clear)
         nwp_coord = MagicMock()
         nwp_coord.data = [_nwp_entry_with_tcc(3, 1.0)]  # tcc_nwp = 1.0 (overcast)
-        entity = _nowcast_entity(current, MagicMock(), {"nwp-v1-1h-2500m": nwp_coord})
+        entity = _nowcast_entity(current, MagicMock(), {"nwp-v2-1h-1km": nwp_coord})
         times = [datetime.now(timezone.utc) + timedelta(minutes=m) for m in [15, 60, 120, 180]]
         results = [entity._resolve_tcc_for_nowcast(t) for t in times]
         assert results == sorted(results)
@@ -1685,7 +1684,7 @@ class TestBuildDailyForecastsWithOpenMeteo:
             current_coordinator=None,
             forecast_coordinator=forecast_coord,
             entry_id="test_entry",
-            model="nwp-v1-1h-2500m",
+            model="nwp-v2-1h-1km",
             location_name="Test",
             lon=lon,
             open_meteo_coordinator=om_coord,
@@ -1780,7 +1779,7 @@ class TestBuildDailyForecastsWithOpenMeteo:
             current_coordinator=None,
             forecast_coordinator=forecast_coord,
             entry_id="test_entry",
-            model="nwp-v1-1h-2500m",
+            model="nwp-v2-1h-1km",
             location_name="Test",
             lon=16.37,
             open_meteo_coordinator=om,
@@ -1801,7 +1800,7 @@ class TestBuildDailyForecastsWithOpenMeteo:
             current_coordinator=None,
             forecast_coordinator=forecast_coord,
             entry_id="test",
-            model="nwp-v1-1h-2500m",
+            model="nwp-v2-1h-1km",
             location_name="Test",
             lon=16.37,
             # no open_meteo_coordinator
@@ -1850,7 +1849,7 @@ class TestBuildDailyForecastsWithOpenMeteo:
             current_coordinator=None,
             forecast_coordinator=forecast_coord,
             entry_id="test_entry",
-            model="nwp-v1-1h-2500m",
+            model="nwp-v2-1h-1km",
             location_name="Test",
             lon=16.37,
             open_meteo_coordinator=om,
@@ -1869,7 +1868,7 @@ class TestBuildDailyForecastsWithOpenMeteo:
             current_coordinator=None,
             forecast_coordinator=forecast_coord,
             entry_id="test_entry",
-            model="nwp-v1-1h-2500m",
+            model="nwp-v2-1h-1km",
             location_name="Test",
             lon=16.37,
             open_meteo_coordinator=om,
@@ -1896,7 +1895,7 @@ class TestAttribution:
             current_coordinator=None,
             forecast_coordinator=forecast_coord,
             entry_id="x",
-            model="nwp-v1-1h-2500m",
+            model="nwp-v2-1h-1km",
             location_name="Test",
             lon=16.0,
             open_meteo_coordinator=om,
@@ -1912,7 +1911,7 @@ class TestAttribution:
             current_coordinator=None,
             forecast_coordinator=forecast_coord,
             entry_id="x",
-            model="nwp-v1-1h-2500m",
+            model="nwp-v2-1h-1km",
             location_name="Test",
             lon=16.0,
             open_meteo_coordinator=om,

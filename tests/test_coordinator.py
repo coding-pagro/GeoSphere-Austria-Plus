@@ -261,7 +261,7 @@ class TestRetryLifecycle:
 class TestForecastCoordinatorFallback:
     @pytest.mark.asyncio
     async def test_returns_fresh_data_on_success(self):
-        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v1-1h-2500m")
+        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v2-1h-1km")
         fresh = [{"t2m": 15.0}]
         coord._api.get_forecast = AsyncMock(return_value=fresh)
         assert await coord._async_update_data() == fresh
@@ -269,7 +269,7 @@ class TestForecastCoordinatorFallback:
 
     @pytest.mark.asyncio
     async def test_returns_cached_data_on_api_error(self):
-        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v1-1h-2500m")
+        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v2-1h-1km")
         cached = [{"t2m": 15.0}]
         coord._last_good_data = cached
         coord._api.get_forecast = AsyncMock(side_effect=GeoSphereApiError("500"))
@@ -278,7 +278,7 @@ class TestForecastCoordinatorFallback:
 
     @pytest.mark.asyncio
     async def test_schedules_retry_on_failure(self):
-        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v1-1h-2500m")
+        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v2-1h-1km")
         coord._last_good_data = [{"t2m": 15.0}]
         coord._api.get_forecast = AsyncMock(side_effect=GeoSphereApiError("500"))
 
@@ -288,7 +288,7 @@ class TestForecastCoordinatorFallback:
 
     @pytest.mark.asyncio
     async def test_raises_update_failed_without_cache(self):
-        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v1-1h-2500m")
+        coord = _make_coordinator(GeoSphereForecastCoordinator, lat=48.2, lon=16.37, model="nwp-v2-1h-1km")
         coord._api.get_forecast = AsyncMock(side_effect=GeoSphereApiError("500"))
 
         with pytest.raises(_UpdateFailed):
@@ -448,10 +448,10 @@ class TestCoordinatorConstructors:
         from custom_components.geosphere_austria_plus.coordinator import (
             GeoSphereForecastCoordinator,
         )
-        coord = GeoSphereForecastCoordinator(self._hass(), 48.2, 16.37, "nwp-v1-1h-2500m")
+        coord = GeoSphereForecastCoordinator(self._hass(), 48.2, 16.37, "nwp-v2-1h-1km")
         assert coord.lat == 48.2
         assert coord.lon == 16.37
-        assert coord.model == "nwp-v1-1h-2500m"
+        assert coord.model == "nwp-v2-1h-1km"
         assert coord._last_good_data is None
         assert coord._retry_step == 0
 

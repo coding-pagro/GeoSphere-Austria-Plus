@@ -49,7 +49,7 @@ Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfr
 
 Alle Sensoren teilen sich dasselbe Gerät (Wetterstation) mit der Wetterentität und stehen sofort in Automationen, Dashboards und dem Energiemanagement zur Verfügung.
 
-> Die TAWES-Station ist optional. Ohne Station werden Temperatur, Feuchte, Windgeschwindigkeit, Windrichtung und Niederschlag aus dem ersten Vorhersagepunkt des gewählten Modells abgeleitet. Taupunkt, Luftdruck und Böen haben kein Modell-Äquivalent und bleiben in diesem Fall leer.
+> Die TAWES-Station ist optional. Ohne Station werden Temperatur, Feuchte, Windgeschwindigkeit, Windrichtung, Böen, Luftdruck und Niederschlag aus dem ersten Vorhersagepunkt des gewählten Modells abgeleitet. Der Taupunkt hat kein Modell-Äquivalent und bleibt in diesem Fall leer.
 
 ### Wetterwarnungen
 
@@ -74,13 +74,15 @@ Vier stündliche Schadstoffsensoren (NO₂, O₃, PM10, PM2.5 in µg/m³) sowie 
 
 | Modell-ID | Auflösung | Zeitraum | Beschreibung |
 |---|---|---|---|
-| `nwp-v1-1h-2500m` | 1 h / 2,5 km | ~48–72 h | **Numerische Wettervorhersage (Standard).** Physikalisches Atmosphärenmodell – gute Gesamtgenauigkeit für Temperatur, Wind und Niederschlag. |
-| `ensemble-v1-1h-2500m` | 1 h / 2,5 km | ~48–72 h | **Ensemble-Vorhersage.** Dasselbe Modell, mehrfach mit leicht unterschiedlichen Startwerten gerechnet. Robuster als ein einzelner NWP-Lauf, glättet aber Extremereignisse ab. |
+| `nwp-v2-1h-1km` | 1 h / 1 km | ~60 h | **Numerische Wettervorhersage (Standard).** Kontrolllauf von C-LAEF AlpeAdria, neue Läufe alle 3 h – gute Gesamtgenauigkeit für Temperatur, Wind, Niederschlag und Luftdruck. |
+| `ensemble-v2-1h-1km` | 1 h / 1 km | ~60 h | **Ensemble-Vorhersage.** C-LAEF-Ensemble, verwendet wird der Median (p50) aller Läufe. Robuster als ein einzelner NWP-Lauf, glättet aber Extremereignisse ab. |
 | `nowcast-v1-15min-1km` | 15 min / 1 km | 2–3 h | **Nowcast.** Keine Modellrechnung, sondern Radarextrapolation – aktuell gemessene Niederschlagszellen werden fortgeschrieben. Sehr präzise für unmittelbar bevorstehenden Regen oder Gewitter, danach rapider Qualitätsverlust. Liefert nur stündliche Vorhersage (kein Daily-Forecast). |
 
 **Empfehlung:** Für den Alltagseinsatz empfiehlt sich **NWP** (Standard). **Ensemble** liefert verlässlichere Tendenzen mit weniger Ausreißern. **Nowcast** ist sinnvoll, wenn es primär darum geht, ob es in den nächsten 1–2 Stunden regnet.
 
 Es können auch **0 Modelle** gewählt werden – in diesem Fall wird keine Wetterentität angelegt.
+
+> **Umstellung auf v2 (November 2026):** GeoSphere hat die Modelle `nwp-v1-1h-2500m` und `ensemble-v1-1h-2500m` am 04.11.2026 eingestellt. Bestehende Einträge werden beim Update automatisch auf die v2-Nachfolger umgestellt. Die Entity-IDs der Wetterentitäten bleiben dabei erhalten.
 
 ---
 
@@ -146,7 +148,7 @@ Die Condition wird aus den TAWES-Echtzeitdaten abgeleitet (Priorität höchste z
 | 8 | `windy` | FF ≥ 10 m/s |
 | 9 | `sunny` / `clear-night` | Default |
 
-Ist keine TAWES-Station konfiguriert, werden alle aktuellen Werte (Condition, Temperatur, Feuchte, Wind, Niederschlag) aus dem ersten verfügbaren Vorhersagepunkt abgeleitet. Taupunkt, Luftdruck und einzelne abgeleitete Felder bleiben leer, da die Modelle diese Größen nicht alle liefern.
+Ist keine TAWES-Station konfiguriert, werden alle aktuellen Werte (Condition, Temperatur, Feuchte, Wind, Niederschlag) aus dem ersten verfügbaren Vorhersagepunkt abgeleitet. Der Taupunkt bleibt leer, da die Modelle ihn nicht liefern; beim Nowcast fehlt zusätzlich der Luftdruck.
 
 Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32 Codes inkl. Gewitter), sowie Wolkenbedeckung (`tcc`), Niederschlag (`rain_acc`, `snow_acc`) und Wind aus dem NWP-Modell verwendet. Bei stündlichen Vorhersagen wird `sy` direkt verwendet; für Tagesvorhersagen wird der ungünstigste (signifikanteste) `sy`-Code der Tagesstunden herangezogen. Akkumulierte Niederschlagssummen können die symbolbasierte Bedingung überschreiben, jedoch nicht `lightning-rainy` abstufen. Hohe Windgeschwindigkeiten (≥ 10 m/s) ergeben `windy` bzw. `windy-variant` bei klaren oder bewölkten Bedingungen.
 
@@ -158,11 +160,11 @@ Die GeoSphere-Modelle **NWP** und **Ensemble** liefern stündliche Daten für ru
 
 ### Attribute
 
-Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Luftfeuchtigkeit) liefert die Integration je Forecast-Slot folgende Zusatzattribute, die in Dashboards (z. B. via `state_attr()`) verwendet werden können:
+Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Luftfeuchtigkeit, Luftdruck) liefert die Integration je Forecast-Slot folgende Zusatzattribute, die in Dashboards (z. B. via `state_attr()`) verwendet werden können:
 
 | Attribut | Einheit | Quelle | Stündlich | Täglich |
 |---|---|---|---|---|
-| `solar_irradiance` | W/m² | NWP `grad`, Ensemble `grad_p50` | ✅ je Stunde | — |
+| `solar_irradiance` | W/m² | NWP `ssrd`, Ensemble `ssrd_p50` | ✅ je Stunde | — |
 | `snow_altitude` | m | NWP `snowlmt`, Ensemble `snowlmt_p50` | ✅ je Stunde | ✅ Tagesminimum |
 | `cape` | m²/s² | NWP `cape`, Ensemble `cape_p50` | ✅ je Stunde | ✅ Tagesmaximum |
 | `uv_index` | dimensionslos (WMO 0–11+) | Open-Meteo `uv_index_max` | — | ✅ Tagesmaximum (nur bei aktivierter Open-Meteo-Verlängerung) |
@@ -188,7 +190,7 @@ Die Integration ist ein reines **Cloud-Polling**-Modul — sie hält keine offen
 | Datenquelle | Intervall | Wann sinnvoll |
 |---|---|---|
 | TAWES (aktuelle Messwerte) | **10 Minuten** | Stationsdaten ändern sich nicht häufiger |
-| NWP/Ensemble/Nowcast (Vorhersage) | **60 Minuten** | Modellläufe werden stündlich aktualisiert |
+| NWP/Ensemble/Nowcast (Vorhersage) | **60 Minuten** | NWP/Ensemble rechnen alle 3 h neu, Nowcast häufiger |
 | Wetterwarnungen | **15 Minuten** | Reaktiver Push für neue Warnungen ist nicht verfügbar |
 | Luftqualität (chem-v2-1h-3km) | **60 Minuten** | Modell publiziert stündlich |
 | Open-Meteo (optional) | **60 Minuten** | Tagesverlängerung |
@@ -246,7 +248,7 @@ automation:
 
 - **Geographischer Geltungsbereich:** GeoSphere DataHub liefert nur Daten für **Österreich**. Außerhalb des österreichischen Bundesgebiets sind die Vorhersagen ungenau oder leer.
 - **Nowcast hat kein Daily-Forecast:** Das Nowcast-Modell liefert nur 2–3 h Voraus — die Entität exponiert daher nur die stündliche Vorhersage, kein `forecast.daily`.
-- **Ensemble bietet keine relative Feuchte:** `rh2m` fehlt in den Ensemble-Parametern → die Wetterentität liefert in dem Modell kein `humidity`-Feld in der Vorhersage.
+- **Ensemble liefert kein Wettersymbol:** Ohne `sy` wird die Condition im Ensemble aus Bewölkung, Niederschlag und Wind abgeleitet; Gewitter (`lightning-rainy`) werden daher nur vom NWP-Modell erkannt.
 - **API-Rate-Limits unbekannt:** GeoSphere veröffentlicht keine harten Rate-Limits. Die Polling-Intervalle sind konservativ gewählt; bei produktivem Einsatz keine Reduzierung empfohlen.
 - **Warnungs-API ist deutsch-only:** Die Warntexte aus `warnungen.zamg.at` sind ausschließlich deutsch.
 

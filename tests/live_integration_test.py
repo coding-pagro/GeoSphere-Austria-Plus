@@ -67,7 +67,7 @@ import ssl
 
 
 STATION_ID = "11389"
-MODELS = ["nwp-v1-1h-2500m", "ensemble-v1-1h-2500m", "nowcast-v1-15min-1km"]
+MODELS = ["nwp-v2-1h-1km", "ensemble-v2-1h-1km", "nowcast-v1-15min-1km"]
 
 GREEN = "\033[92m"
 RED = "\033[91m"

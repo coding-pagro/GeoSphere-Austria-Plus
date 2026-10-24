@@ -34,7 +34,7 @@ All four coordinators inherit a `_RetryMixin` that:
 
 | File | Responsibility |
 |------|---------------|
-| `api.py` | Async aiohttp client. Handles three forecast models (NWP, Ensemble, Nowcast), parameter normalisation, de-accumulation of `grad`/`rain_acc`/`snow_acc` for NWP, and 400-error retry with parameter-removal fallback when an API model rejects an unknown parameter. |
+| `api.py` | Async aiohttp client. Handles three forecast models (NWP, Ensemble, Nowcast), parameter normalisation to internal names/units (`_normalize_v2_params`, `_normalize_nowcast_params`), and 400-error retry with parameter-removal fallback when an API model rejects an unknown parameter. |
 | `coordinator.py` | Four `DataUpdateCoordinator` subclasses + `_RetryMixin` (Fibonacci-backoff retry on transient failures). |
 | `weather.py` | `WeatherEntity`, condition logic (TAWES + symbol-code `sy`), hourly/daily forecast building, snowlmt/cape/solar_irradiance forecast attributes. |
 | `sensor.py` | TAWES sensors (13 of them, including `soil_temperature_10cm`), air-quality sensors, AQI aggregation, warning-level sensor with all-warnings attributes. |
@@ -53,14 +53,15 @@ All four coordinators inherit a `_RetryMixin` that:
 - Windy: FF ≥ 10 m/s
 - Default: `sunny` / `clear-night`
 
-**Forecast conditions** (from NWP/Ensemble model output): the GeoSphere symbol code `sy` is preferred when present (32 codes covering thunderstorms, fog, all rain/snow/mix variants). Falls back to a derived chain over `tcc` (cloud cover), `rain_acc`/`snow_acc` (precipitation, already de-accumulated by `api.py`), and `u10m`/`v10m` (wind vector). Daily forecasts upgrade to `lightning-rainy` if any hourly entry carries a thunderstorm `sy` code (26–32).
+**Forecast conditions** (from NWP/Ensemble model output): the GeoSphere symbol code `sy` is preferred when present (32 codes covering thunderstorms, fog, all rain/snow/mix variants). Falls back to a derived chain over `tcc` (cloud cover), `rain_acc`/`snow_acc` (per-interval precipitation), and `u10m`/`v10m` (wind vector). Daily forecasts upgrade to `lightning-rainy` if any hourly entry carries a thunderstorm `sy` code (26–32).
 
 ### Forecast model parameter conventions
 
 The three forecast models use different parameter naming and value semantics. `api.py` normalises everything so `weather.py` can treat them uniformly:
 
-- **NWP (`nwp-v1-1h-2500m`)**: requests `t2m,mxt2m,mnt2m,rh2m,u10m,v10m,ugust,vgust,rain_acc,snow_acc,tcc,grad,sy,snowlmt,cape`. Both `grad` (Ws/m²) and `rain_acc`/`snow_acc` (mm) are cumulative since model start; `_deaccumulate_grad` and `_deaccumulate_precip` convert them to per-interval values.
-- **Ensemble (`ensemble-v1-1h-2500m`)**: requests p50-percentile variants. Mapped to NWP names via `ENSEMBLE_PARAM_MAP`. Crucially, ensemble `rain_p50`/`snow_p50` are **per-period values** (mm/h), not cumulative — therefore **NOT** de-accumulated. `sundur_p50` (s/h sunshine) is converted to approximate `tcc` via `1 - sundur/3600`.
+- **NWP (`nwp-v2-1h-1km`, C-LAEF control run)**: requests `2t,2r,10u,10v,10fg,rain,sf,tcc,ssrd,sy,snowlmt,cape,msl`, renamed to internal names via `NWP_PARAM_MAP` (`t2m`, `rh2m`, `u10m`/`v10m`, `wind_gust_speed`, `rain_acc`/`snow_acc`, `tcc`, `grad`, `sy`, `snowlmt`, `cape`, `pressure`). All values are **per interval** (no accumulation since model start → no de-accumulation). Unit conversions: `tcc` % → fraction 0–1, `msl` Pa → hPa. No `mxt2m`/`mnt2m` → daily extremes come from min/max of hourly `t2m`.
+- **Ensemble (`ensemble-v2-1h-1km`)**: requests the `_p50` (median) variants of the same parameters except `sy` (not offered). `ENSEMBLE_PARAM_MAP` is derived from `NWP_PARAM_MAP`; same normalisation as NWP.
+- **Legacy v1 models** (`nwp-v1-1h-2500m`, `ensemble-v1-1h-2500m`) were shut down by GeoSphere on 2026-11-04. `async_migrate_entry` (config entry VERSION 1 → 2) rewrites stored model IDs via `LEGACY_FORECAST_MODEL_MAP` and migrates the weather entities' unique IDs (`geosphere_plus_{entry_id}_{model}`) so entity IDs survive.
 - **Nowcast (`nowcast-v1-15min-1km`)**: requests `t2m,rh2m,ff,dd,fx,rr,pt`. Wind components are reconstructed from scalar `ff`/`dd`. Precipitation type `pt` (WMO codes) splits the `rr` rate into the `rain_acc`/`snow_acc` slots that downstream code expects. `tcc` is unavailable (set to `None`).
 
 ### API Endpoints
@@ -75,8 +76,8 @@ The three forecast models use different parameter naming and value semantics. `a
 
 | Model | Resolution | Update | Use case |
 |-------|-----------|--------|----------|
-| NWP (default) | 1h / 2.5 km | Hourly | General-purpose forecast, 48–72h |
-| Ensemble | 1h / 2.5 km | Hourly | Smoother averaged forecast (median percentile) |
+| NWP (default) | 1h / 1 km | Every 3 h | General-purpose forecast, ~60h |
+| Ensemble | 1h / 1 km | Every 3 h | Smoother averaged forecast (median percentile) |
 | Nowcast | 15 min / 1 km | Sub-hourly | Radar-extrapolation precipitation, 2–3h horizon, no daily forecast |
 
 ### Forecast attributes
@@ -85,22 +86,22 @@ Beyond standard HA Forecast fields (`native_temperature`, `native_precipitation`
 
 | Attribute | Unit | Hourly | Daily aggregation |
 |-----------|------|--------|-------------------|
-| `solar_irradiance` | W/m² | from `grad` (NWP/Ensemble) | — |
+| `solar_irradiance` | W/m² | from `ssrd` (NWP/Ensemble) | — |
 | `snow_altitude` | m | from `snowlmt` | day-minimum |
 | `cape` | m²/s² | from `cape` | day-maximum |
 
 ## Testing
 
-518 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Key test files:
+572 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Key test files:
 
-- `test_api.py` — HTTP client, parameter URL building, GeoJSON parsing, ensemble normalisation, deaccumulation.
+- `test_api.py` — HTTP client, parameter URL building, GeoJSON parsing, v2 + nowcast normalisation (names, units).
 - `test_coordinator.py` — Fibonacci-backoff retry, last-known-good caching.
 - `test_weather_entity.py` — condition derivation, hourly/daily forecast building, all forecast attributes (snow_altitude, cape, solar_irradiance, wind gust).
 - `test_sensor.py` — sensor descriptions, native_value extraction.
 - `test_conditions.py` — pure `nwp_to_condition` logic, including sy code mapping.
 - `test_air_quality.py` — AQI aggregation, EU-index breakpoints.
 - `test_warnings.py` — warnings parser, level aggregation.
-- `test_init.py` — entry setup, options-flow data flow.
+- `test_init.py` — entry setup, options-flow data flow, v1 → v2 config entry migration.
 - `test_config_flow.py` — config UI, station validation.
 
 ## Translations
