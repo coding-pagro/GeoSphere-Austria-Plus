@@ -1,0 +1,59 @@
+name: Forecast log
+
+# Stuendlicher Mitschnitt von Nowcast-/NWP-Prognosen und TAWES-Messungen fuer den
+# spaeteren Modellvergleich (siehe tools/forecast_log/README.md). Die Daten landen
+# auf dem Branch "forecast-data" (wird beim ersten Lauf angelegt) und beruehren main nicht.
+# Commits mit dem GITHUB_TOKEN loesen keine weiteren Workflows aus.
+on:
+  schedule:
+    # Minute 7 statt 0: zur vollen Stunde ist bei GitHub am meisten los.
+    - cron: "7 * * * *"
+  workflow_dispatch: # Manuell startbar zum Testen
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forecast-log
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Prognosen und Messungen sichern
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Datenbranch bereitstellen
+        run: |
+          git config user.name "forecast-log[bot]"
+          git config user.email "forecast-log@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin forecast-data >/dev/null 2>&1; then
+            git fetch --depth=1 origin forecast-data
+            git worktree add -B forecast-data data FETCH_HEAD
+          else
+            git worktree add --detach data
+            git -C data checkout --orphan forecast-data
+            git -C data rm -rf --quiet .
+          fi
+
+      - name: Sammeln
+        # Beendet sich nur dann mit Fehler, wenn gar nichts gesammelt werden konnte
+        # (z. B. dauerhaftes Rate-Limit). Teilausfaelle erscheinen als Warnung.
+        run: python tools/forecast_log/forecast_log.py collect --data-dir data
+
+      - name: Speichern
+        run: |
+          cd data
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nichts zu speichern."
+          else
+            git commit -m "Lauf $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push origin forecast-data
+          fi
