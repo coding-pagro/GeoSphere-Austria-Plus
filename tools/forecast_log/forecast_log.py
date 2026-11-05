@@ -37,7 +37,9 @@ NOWCAST = ("nowcast-v1-15min-1km", ("t2m", "rr"))
 NWP = ("nwp-v2-1h-1km", ("2t", "tp"))
 NWP_STEPS = 7           # aktuelle Stunde + 6 Stunden
 OBS_PARAMS = "TL,RR"
-OBS_WINDOW_MIN = 130    # ueberlappt mit dem Vorlauf, damit ein verpasster Lauf keine Luecke hinterlaesst
+# 12 h: GitHub laesst geplante Laeufe oft ausfallen (gemessen: 3-5 pro Tag statt 24). Das Fenster
+# muss die Luecke bis zum vorherigen Lauf abdecken, sonst finden dessen Prognosen keine Messung.
+OBS_WINDOW_MIN = 720
 ALWAYS_INCLUDE = "11389"  # ST.POELTEN LANDHAUS, Station des Users
 USER_AGENT = "geosphere-forecast-log/1.0"
 
