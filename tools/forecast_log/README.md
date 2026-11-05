@@ -10,14 +10,14 @@ Nur Python-Standardbibliothek.
 
 ## Was gesammelt wird
 
-Pro Lauf **eine** Datei `data/JJJJ/MM/TT/run_HHMM.json.gz` (ca. 3 KiB, rund 2 bis 3 MB pro Monat bei
+Pro Lauf **eine** Datei `data/JJJJ/MM/TT/run_HHMM.json.gz` (ca. 5 KiB, rund 4 MB pro Monat bei
 stündlichen Läufen) mit
 
 | Inhalt | Quelle | Umfang |
 |---|---|---|
 | Nowcast | `nowcast-v1-15min-1km`: `t2m` (Temperatur), `rr` (Niederschlag) | alle Schritte, ca. 3 h voraus |
 | NWP | `nwp-v2-1h-1km`: `2t`, `tp` | aktuelle Stunde + 6 h |
-| Messungen | `tawes-v1-10min`: `TL`, `RR` | letzte ca. 2 h |
+| Messungen | `tawes-v1-10min`: `TL`, `RR` | letzte 12 h |
 
 für 25 Stationen (`stations.json`): gleichmäßig über die Höhe von 116 m bis 3437 m verteilt, dazu
 die Station des Users (11389, St. Pölten Landhaus). Neue Liste erzeugen:
@@ -70,9 +70,30 @@ Zu beachten:
 * **Rate-Limit:** GeoSphere begrenzt Abfragen. GitHub-Server teilen sich IP-Adressen mit vielen
   anderen Nutzern, einzelne Läufe können daher mit „API rate limit exceeded“ scheitern. Das Skript
   wiederholt vier Mal mit Pausen; Lücken in den Daten sind danach möglich, aber unkritisch, weil die
-  Messungen jedes Laufs die letzten 2 Stunden überlappen. Der Lauf schlägt nur fehl (E-Mail von
+  Messungen jedes Laufs die letzten 12 Stunden überlappen. Der Lauf schlägt nur fehl (E-Mail von
   GitHub), wenn gar nichts gesammelt werden konnte.
-* **Pünktlichkeit:** Geplante Läufe starten bei GitHub oft einige Minuten zu spät.
+* **Pünktlichkeit:** GitHub startet geplante Läufe oft verspätet und lässt viele ganz ausfallen
+  (Okt./Nov. 2026: 3 bis 5 Läufe pro Tag statt 24). Für verlässlich stündliche Läufe den Workflow
+  von außen über die API starten (`workflow_dispatch`), etwa per Home-Assistant-Automation:
+
+  ```yaml
+  # configuration.yaml
+  rest_command:
+    forecast_log_dispatch:
+      url: https://api.github.com/repos/coding-pagro/GeoSphere-Austria-Plus/actions/workflows/forecast-log.yml/dispatches
+      method: POST
+      headers:
+        Authorization: !secret github_forecast_log_token
+        Accept: application/vnd.github+json
+        X-GitHub-Api-Version: "2022-11-28"
+      payload: '{"ref":"main"}'
+      content_type: application/json
+  ```
+
+  `github_forecast_log_token` in `secrets.yaml` als `"Bearer github_pat_…"`: ein Fine-grained Token
+  nur für dieses Repository mit der Berechtigung *Actions: Read and write*. Die Automation ruft
+  `rest_command.forecast_log_dispatch` stündlich zur Minute 7 auf. Der Zeitplan im Workflow bleibt
+  als Rückfall aktiv; `concurrency` verhindert parallele Läufe.
 * **Abschaltung:** GitHub deaktiviert Zeitpläne in öffentlichen Repositories nach 60 Tagen ohne
   Aktivität. Bei einem aktiven Repo unwahrscheinlich; sonst unter *Actions* wieder einschalten.
 * **Beenden:** Workflow-Datei löschen oder unter *Actions* deaktivieren. Der Branch `forecast-data`
