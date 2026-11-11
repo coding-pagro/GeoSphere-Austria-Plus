@@ -2,6 +2,7 @@
 """Wertet die von forecast_log.py gesammelten Laeufe aus (Nowcast vs. NWP vs. Messung).
 
   python analyze.py --data-dir data [--stations data/stations.json]
+  python analyze.py --data-dir data --inca
 
 Temperatur: Fehler = Prognose - Messung (Grad C), je Modell, Vorlauf und Hoehenklasse
   roh        Modellwert unveraendert
@@ -22,9 +23,10 @@ import gzip
 import json
 import math
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import mean, median
 
 # Modell -> (Temperatur-Parameter, Niederschlags-Parameter)
 MODELS = {"nowcast": ("t2m", "rr"), "nwp": ("2t", "tp")}
@@ -227,16 +229,181 @@ def eval_precip(runs, obs, stations):
         )
 
 
+def point(station):
+    return station["id"], station["lat"], station["lon"]
+
+
+def comparison_observations(runs):
+    """TAWES-Zeitreihen nach ID und den vom Messdienst gelieferten Koordinaten."""
+    obs = defaultdict(lambda: defaultdict(dict))
+    for run in runs:
+        snapshot = run.get("obs")
+        if not snapshot:
+            continue
+        times = [parse_t(t) for t in snapshot["times"]]
+        for sid, location in snapshot.get("locations", {}).items():
+            for param, values in snapshot["values"][sid].items():
+                obs[(sid, *location)][param].update(
+                    (t, v) for t, v in zip(times, values)
+                    if type(v) in (int, float) and math.isfinite(v)
+                )
+    return obs
+
+
+def precipitation_reference(forecast, inca, series):
+    """Nur identische Stundenfenster mit allen sechs TAWES-Intervallen."""
+    start, end = (parse_t(inca[k]) for k in ("interval_start", "interval_end"))
+    if (
+        (start, end) != (parse_t(forecast["interval_start"]), parse_t(forecast["interval_end"]))
+        or end - start != timedelta(hours=1)
+    ):
+        return None, "different_interval"
+    parts = [series.get(end - timedelta(minutes=10 * k)) for k in range(6)]
+    if None in parts:
+        return None, "missing_obs"
+    return sum(parts), None
+
+
+def compare_current(runs, field, obs):
+    availability = {"forecast": Counter(), "inca": Counter()}
+    excluded = Counter()
+    ages = []
+    groups = defaultdict(list)
+    for run in runs:
+        comparison = run["comparison"]
+        sampled = parse_t(comparison["sampled_at"])
+        for station in run["stations"]:
+            sid = station["id"]
+            forecast = comparison["forecast"][sid][field]
+            inca = comparison["inca"][sid][field]
+            availability["forecast"][forecast["status"]] += 1
+            availability["inca"][inca["status"]] += 1
+            if inca["status"] == "ok":
+                age = (sampled - parse_t(inca["valid_at"])).total_seconds() / 60
+                ages.append(age)
+            if forecast["status"] != "ok" or inca["status"] != "ok":
+                excluded["missing_candidate"] += 1
+                continue
+
+            reference = obs.get(point(station), {})
+            if field == "temperature":
+                truth = obs_at(reference.get("TL", {}), sampled)
+                reason = "missing_obs" if truth is None else None
+            else:
+                truth, reason = precipitation_reference(forecast, inca, reference.get("RR", {}))
+            if reason:
+                excluded[reason] += 1
+                continue
+            groups[int(age // 30) * 30].append((forecast["value"], inca["value"], truth))
+    return availability, excluded, ages, groups
+
+
+def comparison_mae(rows, index):
+    return mean(abs(row[index] - row[2]) for row in rows)
+
+
+def precipitation_events(rows, index):
+    events = Counter(
+        (row[index] >= PRECIP_THRESHOLD, row[2] >= PRECIP_THRESHOLD) for row in rows
+    )
+    return events[True, True], events[False, True], events[True, False]
+
+
+def report_current_comparison(runs):
+    obs = comparison_observations(runs)
+    runs = [run for run in runs if run.get("comparison")]
+    print("# INCA v2 und NWP-Fallback im Vergleich")
+    if not runs:
+        print("\nKeine zeitgleich aufgezeichneten INCA- und Fallback-Abrufe vorhanden.")
+        return
+
+    times = sorted(parse_t(run["comparison"]["sampled_at"]) for run in runs)
+    minutes = ", ".join(f"{m:02d}" for m in sorted({t.minute for t in times}))
+    stations = {point(st): st for run in runs for st in run["stations"]}
+    print(f"\n{len(runs)} Abrufe an {len(stations)} Standorten von {times[0]:%Y-%m-%d %H:%M} "
+          f"bis {times[-1]:%Y-%m-%d %H:%M} UTC. Erfasste Minuten innerhalb der Stunde sind {minutes}.")
+    print("Vergleich auf denselben Stationsabrufen gegen TAWES. "
+          "Wiederholte Abrufe können dieselbe Analyse oder dasselbe Stundenintervall enthalten.")
+
+    for field, title, unit in (
+        ("temperature", "Temperatur", "°C"),
+        ("precipitation", "Niederschlag", "mm"),
+    ):
+        counts, excluded, ages, groups = compare_current(runs, field, obs)
+        print(f"\n## {title}\n")
+        print("| Quelle | Nutzbar | Fehlender Wert | Rasterlücke | Abruffehler |")
+        print("|---|---:|---:|---:|---:|")
+        for source, label in (("forecast", "NWP-Fallback"), ("inca", "INCA v2")):
+            c = counts[source]
+            total = sum(c.values())
+            availability = f"{c['ok'] / total:.1%}" if total else "—"
+            print(f"| {label} | {c['ok']}/{total} ({availability}) | "
+                  f"{c['missing']} | {c['grid_gap']} | {c['fetch_error']} |")
+        if ages:
+            print(f"\nINCA-Alter in Minuten (Minimum / Median / Maximum) "
+                  f"{min(ages):.1f} / {median(ages):.1f} / {max(ages):.1f}.")
+        else:
+            print("\nINCA-Alter nicht verfügbar.")
+        rows = [row for group in groups.values() for row in group]
+        print(f"\n{len(rows)} vergleichbare Fälle. Ausgeschlossen sind "
+              f"{excluded['missing_candidate']} Fälle ohne beide nutzbaren Kandidaten, "
+              f"{excluded['missing_obs']} ohne passende TAWES-Messung"
+              + (f", {excluded['different_interval']} mit verschiedenen Intervallen."
+                 if field == "precipitation" else "."))
+        if not rows:
+            print("\nForecast-Fallback beibehalten. Für dieses Feld fehlen vergleichbare Fälle.")
+            continue
+
+        print(f"\n| INCA-Alter (min) | Fälle | MAE NWP ({unit}) | MAE INCA ({unit}) |")
+        print("|---|---:|---:|---:|")
+        age_groups = [(f"{age} bis <{age + 30}", group) for age, group in sorted(groups.items())]
+        for label, group in [("Alle", rows), *age_groups]:
+            print(f"| {label} | {len(group)} | {comparison_mae(group, 0):.3f} | "
+                  f"{comparison_mae(group, 1):.3f} |")
+        reasons = []
+        if comparison_mae(rows, 1) >= comparison_mae(rows, 0):
+            reasons.append("Der mittlere absolute Fehler von INCA ist gleich hoch oder größer.")
+        if counts["inca"]["ok"] < counts["forecast"]["ok"]:
+            reasons.append("INCA ist seltener verfügbar.")
+        if field == "precipitation":
+            nwp_hits, nwp_miss, nwp_false = precipitation_events(rows, 0)
+            inca_hits, inca_miss, inca_false = precipitation_events(rows, 1)
+            print(f"\nEreignisse ab {PRECIP_THRESHOLD:g} mm je Stunde.\n")
+            print("| Quelle | Treffer | Übersehen | Fehlalarme |")
+            print("|---|---:|---:|---:|")
+            print(f"| NWP-Fallback | {nwp_hits} | {nwp_miss} | {nwp_false} |")
+            print(f"| INCA v2 | {inca_hits} | {inca_miss} | {inca_false} |")
+            if nwp_hits + nwp_miss == 0:
+                reasons.append("In der Stichprobe fehlt gemessener Niederschlag.")
+            elif inca_miss > nwp_miss or inca_false > nwp_false:
+                reasons.append("INCA übersieht mehr Ereignisse oder erzeugt mehr Fehlalarme.")
+        if reasons:
+            print("\nForecast-Fallback beibehalten. " + " ".join(reasons))
+        else:
+            print("\nFür die erfassten Standorte und Zeiten stützt die Stichprobe einen Vorrang "
+                  "für INCA. Der MAE ist kleiner und die Verfügbarkeit mindestens gleich hoch.")
+
+    print("\n## Unabhängigkeit der Referenz\n")
+    print("TAWES-Beobachtungen können in INCA einfließen. Die Nachweise sind je Standort aufgeführt.\n")
+    for (sid, lat, lon), station in sorted(stations.items()):
+        evidence = station.get("inca_independence_source") or "unbelegt"
+        print(f"- {sid} {station['name']} ({lat}, {lon}) · {evidence}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--stations", type=Path, help="Standard: <data-dir>/stations.json")
+    parser.add_argument("--inca", action="store_true", help="INCA und NWP-Fallback als Markdown-Bericht auswerten")
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-    stations = json.loads((args.stations or args.data_dir / "stations.json").read_text("utf-8"))
     runs, obs = load(args.data_dir)
+    if args.inca:
+        report_current_comparison(runs)
+        return 0
+    stations = json.loads((args.stations or args.data_dir / "stations.json").read_text("utf-8"))
     if not runs:
         print("Keine Laeufe gefunden.")
         return 1

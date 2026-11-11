@@ -1,7 +1,7 @@
-# Forecast-Log: Nowcast vs. NWP vs. Messung
+# Forecast-Log
 
-Sammelt über Tage und Wochen Prognosen von GeoSphere (Nowcast, NWP) und die tatsächlichen
-TAWES-Messungen, damit sich später belegen lässt, welches Modell wann näher an der Realität liegt.
+Sammelt über Tage und Wochen Prognosen von GeoSphere (Nowcast, NWP), INCA-Analysen und
+TAWES-Messungen. Damit lassen sich Vorhersagen und die Quellen für aktuelle Wetterwerte auswerten.
 Hintergrund: Die Prognosen sind über die API nicht rückwirkend abrufbar, Vergleiche müssen also
 „vorwärts“ aufgezeichnet werden.
 
@@ -10,20 +10,55 @@ Nur Python-Standardbibliothek.
 
 ## Was gesammelt wird
 
-Pro Lauf **eine** Datei `data/JJJJ/MM/TT/run_HHMM.json.gz` (ca. 3 KiB, rund 2 bis 3 MB pro Monat bei
-stündlichen Läufen) mit
+Pro Lauf **eine** Datei `data/JJJJ/MM/TT/run_HHMM.json.gz` mit
 
 | Inhalt | Quelle | Umfang |
 |---|---|---|
 | Nowcast | `nowcast-v1-15min-1km`: `t2m` (Temperatur), `rr` (Niederschlag) | alle Schritte, ca. 3 h voraus |
-| NWP | `nwp-v2-1h-1km`: `2t`, `tp` | aktuelle Stunde + 6 h |
+| NWP | `nwp-v2-1h-1km`: `2t`, `tp`, `rain`, `sf` | aktuelle Stunde + 6 h |
+| INCA | `inca-v2-1h-1km`: `2t`, `tp` | jüngster zurückgelieferter Zeitschritt bis maximal 2 h vor Abruf |
 | Messungen | `tawes-v1-10min`: `TL`, `RR` | letzte ca. 2 h |
 
 für 25 Stationen (`stations.json`): gleichmäßig über die Höhe von 116 m bis 3437 m verteilt, dazu
 die Station des Users (11389, St. Pölten Landhaus). Neue Liste erzeugen:
-`python forecast_log.py init-stations --n 40`. Pro Lauf sind es nur **3 API-Abfragen**.
+`python forecast_log.py init-stations --n 40`. Im Normalfall sind es **4 API-Abfragen** pro Lauf.
 
-## Auswerten
+## Aktuelle Werte aus INCA und NWP vergleichen
+
+```bash
+python tools/forecast_log/analyze.py --data-dir data --inca
+```
+
+Die ersten Live-Ergebnisse stehen im [Pilotbericht](INCA_REPORT.md).
+
+Der Logger fragt beide Quellen parallel an denselben Stationskoordinaten ab. Er speichert den gemeinsamen
+Erhebungszeitpunkt nach Eingang der Antworten, die Empfangszeit pro Quelle und die ausgewählten Werte mit
+Gültigkeitszeit. Wie die NWP-Standardentität von Plus wählt der Logger den ersten Zeitschritt in
+API-Reihenfolge, der höchstens eine Stunde zurückliegt. Für INCA verwendet er den jüngsten bereits gültigen
+Zeitschritt innerhalb von zwei Stunden wie im Entwurf #69. Die Auswertung liest die gespeicherten
+Kandidaten. Aufzeichnungen ohne gleichzeitigen INCA-Abruf fließen nur in die Vorhersageauswertung ein.
+
+- **Temperatur** wird mit der TAWES-Messung am Erhebungszeitpunkt verglichen. Zwischen zwei
+  unmittelbar benachbarten 10-Minuten-Messungen wird linear interpoliert.
+- **Niederschlag** wird in mm pro Stunde verglichen. Plus verwendet `rain + sf`. Der Logger
+  speichert zusätzlich den Entitätswert, der bei Trockenheit leer ist. Für den
+  Mengenvergleich zählt eine vollständig beobachtete trockene Stunde als 0 mm. Es zählen
+  nur Fälle, in denen das Stundenintervall beider Kandidaten identisch ist und alle sechs
+  TAWES-Summen vorliegen. Treffer, übersehene Ereignisse und Fehlalarme beziehen sich auf
+  mindestens 0,1 mm pro Stunde.
+- **Verfügbarkeit** und **Analysealter** werden für jedes Feld berichtet. Ein fehlender
+  Parameterwert, eine von der API gemeldete Rasterlücke und ein Abruffehler werden
+  getrennt gezählt. TAWES-Messungen werden anhand von Stations-ID und Koordinaten zugeordnet.
+  Spätere Läufe können fehlende TAWES-Referenzen ergänzen.
+
+TAWES ist die erste Referenz. Stationsbeobachtungen können in INCA einfließen. Der Bericht
+weist die Unabhängigkeit je Standort aus. In `stations.json` kann
+`inca_independence_source` eine Quelle für belegte Unabhängigkeit enthalten. Beim vorhandenen
+Stationssatz ist sie unbelegt. [GeoSphere DataHub – INCA v2](https://data.hub.geosphere.at/dataset/inca-v2-1h-1km)
+
+Die Idee zur INCA-Nutzung stammt von [slettmayer und GeoSphere Austria Next](https://github.com/slettmayer/ha-geosphere-next#entities).
+
+## Vorhersagen auswerten
 
 ```bash
 python tools/forecast_log/analyze.py --data-dir <ordner-mit-den-daten>
@@ -51,7 +86,7 @@ Funktioniert nur, solange der Rechner an ist. Dauerhaft ohne PC:
 
 ## Ohne PC: GitHub Actions
 
-`.github/workflows/forecast-log.yml` startet den Lauf stündlich (Minute 7) auf GitHubs Servern und
+`.github/workflows/forecast-log.yml` plant Läufe zur Minute 7, 27 und 47 auf GitHubs Servern und
 speichert die Dateien auf dem Branch `forecast-data` (wird beim ersten Lauf angelegt, `main` bleibt
 unberührt). In öffentlichen Repositories ist das kostenlos.
 
@@ -68,10 +103,10 @@ unberührt). In öffentlichen Repositories ist das kostenlos.
 Zu beachten:
 
 * **Rate-Limit:** GeoSphere begrenzt Abfragen. GitHub-Server teilen sich IP-Adressen mit vielen
-  anderen Nutzern, einzelne Läufe können daher mit „API rate limit exceeded“ scheitern. Das Skript
-  wiederholt vier Mal mit Pausen; Lücken in den Daten sind danach möglich, aber unkritisch, weil die
-  Messungen jedes Laufs die letzten 2 Stunden überlappen. Der Lauf schlägt nur fehl (E-Mail von
-  GitHub), wenn gar nichts gesammelt werden konnte.
+  anderen Nutzern, einzelne Abrufe können daher mit „API rate limit exceeded“ scheitern.
+  Der Vergleich verwendet pro Quelle einen Abrufversuch, damit spätere Antworten nicht mit der
+  ursprünglichen Stichprobe vermischt werden. Nowcast, TAWES und das NWP-Vorhersagearchiv werden
+  bei temporären Fehlern erneut abgefragt. Der Lauf schlägt fehl, wenn gar nichts gesammelt werden konnte.
 * **Pünktlichkeit:** Geplante Läufe starten bei GitHub oft einige Minuten zu spät.
 * **Abschaltung:** GitHub deaktiviert Zeitpläne in öffentlichen Repositories nach 60 Tagen ohne
   Aktivität. Bei einem aktiven Repo unwahrscheinlich; sonst unter *Actions* wieder einschalten.

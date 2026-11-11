@@ -1,13 +1,13 @@
 name: Forecast log
 
-# Stuendlicher Mitschnitt von Nowcast-/NWP-Prognosen und TAWES-Messungen fuer den
+# Mitschnitt von Nowcast-/NWP-Prognosen, INCA-Analysen und TAWES-Messungen fuer den
 # spaeteren Modellvergleich (siehe tools/forecast_log/README.md). Die Daten landen
 # auf dem Branch "forecast-data" (wird beim ersten Lauf angelegt) und beruehren main nicht.
 # Commits mit dem GITHUB_TOKEN loesen keine weiteren Workflows aus.
 on:
   schedule:
-    # Minute 7 statt 0: zur vollen Stunde ist bei GitHub am meisten los.
-    - cron: "7 * * * *"
+    # Drei Phasen der Stunde, damit auch die Verfügbarkeit frischer INCA-Analysen sichtbar wird.
+    - cron: "7,27,47 * * * *"
   workflow_dispatch: # Manuell startbar zum Testen
 
 permissions:

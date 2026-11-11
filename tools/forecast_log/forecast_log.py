@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Loggt GeoSphere-Prognosen (Nowcast, NWP) und TAWES-Messungen fuer einen spaeteren Vergleich.
+"""Loggt GeoSphere-Prognosen, INCA-Analysen und TAWES-Messungen.
 
-Gedacht fuer einen stuendlichen Lauf (siehe README.md). Jeder Lauf schreibt EINE Datei
+Jeder Lauf schreibt eine Datei
 ``<data-dir>/JJJJ/MM/TT/run_HHMM.json.gz`` mit
 
 * der aktuellen Nowcast-Prognose (Temperatur ``t2m``, Niederschlag ``rr``) fuer alle Stationen,
 * der aktuellen NWP-Prognose (``2t``, ``tp``) fuer die naechsten 6 Stunden,
+* den aktuellen Vergleichswerten aus dem NWP-Fallback und INCA v2,
 * den TAWES-Messungen (``TL``, ``RR``) der letzten ~2 Stunden.
 
-Ausgewertet wird spaeter mit ``analyze.py``: Prognosen eines Laufs gegen die Messungen,
-die erst NACH dem Lauf entstanden sind (faire Rueckschau, kein Nachrechnen mit bekannten Werten).
+Ausgewertet wird mit ``analyze.py``. Der Schalter ``--inca`` vergleicht aktuelle Werte.
 
-Nur Standardbibliothek. Wenige Abfragen pro Lauf (3), weil die GeoSphere-API ein Rate-Limit hat.
+Nur Standardbibliothek.
 
   python forecast_log.py init-stations --out stations.json [--n 25]
   python forecast_log.py collect --data-dir data [--stations stations.json]
@@ -21,11 +21,13 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import math
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -34,7 +36,10 @@ HERE = Path(__file__).resolve().parent
 
 # Modell -> (Ressource, Parameter: Temperatur, Niederschlag)
 NOWCAST = ("nowcast-v1-15min-1km", ("t2m", "rr"))
-NWP = ("nwp-v2-1h-1km", ("2t", "tp"))
+NWP = ("nwp-v2-1h-1km", ("2t", "tp", "rain", "sf"))
+INCA = ("inca-v2-1h-1km", ("2t", "tp"))
+INCA_MAX_AGE = timedelta(hours=2)  # wie im Entwurf #69
+HOUR = timedelta(hours=1)
 NWP_STEPS = 7           # aktuelle Stunde + 6 Stunden
 OBS_PARAMS = "TL,RR"
 OBS_WINDOW_MIN = 130    # ueberlappt mit dem Vorlauf, damit ein verpasster Lauf keine Luecke hinterlaesst
@@ -62,20 +67,133 @@ def fetch(url: str, tries: int = 4) -> dict:
     raise RuntimeError("unreachable")
 
 
-def fetch_forecast(model: str, params: tuple[str, ...], stations: list[dict], keep: int | None) -> dict:
+def fetch_points(
+    endpoint: str, params: tuple[str, ...], stations: list[dict], *,
+    tries: int = 4, **filters: str,
+) -> dict:
     """Mehrpunkt-Abfrage: ein Request fuer alle Stationen. Reihenfolge der Antwort = Reihenfolge der Punkte."""
     query = [("parameters", ",".join(params)), ("output_format", "geojson")]
     query += [("lat_lon", f"{s['lat']},{s['lon']}") for s in stations]
-    data = fetch(f"{BASE}/timeseries/forecast/{model}?{urllib.parse.urlencode(query)}")
+    query.extend(filters.items())
+    data = fetch(f"{BASE}/timeseries/{endpoint}?{urllib.parse.urlencode(query)}", tries=tries)
+    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     features = data["features"]
     if len(features) != len(stations):
-        raise ValueError(f"{model}: {len(features)} Features fuer {len(stations)} Stationen")
-    times = data["timestamps"][:keep]
-    values = {}
+        raise ValueError(f"{endpoint}: {len(features)} Features fuer {len(stations)} Stationen")
+    values, grid_gaps = {}, []
     for station, feature in zip(stations, features):
+        if "geometry" in feature and feature["geometry"] is None:
+            grid_gaps.append(station["id"])
+            continue
         got = feature["properties"]["parameters"]
-        values[station["id"]] = {p: got[p]["data"][:keep] for p in params if p in got}
-    return {"model": model, "ref": data.get("reference_time"), "times": times, "values": values}
+        values[station["id"]] = {p: got[p]["data"] for p in params if p in got}
+    return {
+        "ref": data.get("reference_time"), "times": data["timestamps"],
+        "values": values, "retrieved_at": retrieved_at, "grid_gaps": grid_gaps,
+    }
+
+
+def fetch_forecast(model: str, params: tuple[str, ...], stations: list[dict], *, tries: int = 4) -> dict:
+    return {"model": model, **fetch_points(f"forecast/{model}", params, stations, tries=tries)}
+
+
+def trim_forecast(result: dict, keep: int) -> dict:
+    return {
+        **result, "times": result["times"][:keep],
+        "values": {
+            sid: {p: series[:keep] for p, series in values.items()}
+            for sid, values in result["values"].items()
+        },
+    }
+
+
+def finite(value) -> bool:
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def candidates(source: str, sid: str, fetched: datetime, data: dict | None, status="missing") -> dict:
+    """Wählt einen Zeitschritt pro Quelle, auch wenn einzelne Felder fehlen."""
+    if data and sid in data.get("grid_gaps", []):
+        status = "grid_gap"
+    result = {
+        "source": source, "retrieved_at": data.get("retrieved_at") if data else None,
+        "temperature": {"status": status}, "precipitation": {"status": status},
+    }
+    if data is None or status == "grid_gap":
+        return result
+
+    is_inca = source == INCA[0]
+    times = []
+    for index, raw_time in enumerate(data["times"]):
+        try:
+            timestamp = datetime.fromisoformat(raw_time)
+        except (TypeError, ValueError):
+            continue
+        if timestamp.tzinfo is not None:
+            times.append((timestamp, index))
+    if is_inca:
+        selected = max(
+            ((t, i) for t, i in times if fetched - INCA_MAX_AGE <= t <= fetched),
+            default=None,
+        )
+    else:
+        # GeoSphereWeatherEntity._first_forecast_entry nimmt den ersten
+        # Zeitstempel in API-Reihenfolge, maximal eine Stunde in der Vergangenheit.
+        selected = next(((t, i) for t, i in times if t >= fetched - HOUR), None)
+    if selected is None:
+        return result
+    valid_at, index = selected
+    series = data["values"].get(sid, {})
+
+    def value(param: str):
+        points = series.get(param, [])
+        raw = points[index] if index < len(points) else None
+        return raw if finite(raw) else None
+
+    temperature = value("2t")
+    if is_inca:
+        amount = value("tp")
+        entity_amount = amount
+    else:
+        rain, snow = value("rain"), value("sf")
+        # Plus liefert None bei Trockenheit und behandelt einzelne fehlende
+        # Komponenten als 0. Für den Mengenvergleich braucht es beide Werte.
+        components = rain or 0.0, snow or 0.0
+        entity_amount = sum(components) if any(components) else None
+        amount = rain + snow if rain is not None and snow is not None else None
+    result["temperature"] = {
+        "status": "ok" if temperature is not None else "missing",
+        "valid_at": valid_at.isoformat(), "value": temperature,
+    }
+    result["precipitation"] = {
+        "status": "ok" if amount is not None else "missing",
+        "valid_at": valid_at.isoformat(), "value": amount, "entity_value": entity_amount,
+        "interval_start": (valid_at - HOUR).isoformat(), "interval_end": valid_at.isoformat(),
+    }
+    return result
+
+
+def fetch_inca(stations: list[dict], started: datetime, errors: list[str]) -> dict:
+    """Eine Mehrpunktabfrage; bei Rastergrenzen fehlerhafte Punkte isolieren."""
+    resource, params = INCA
+    try:
+        data = fetch_points(
+            f"historical/{resource}", params, stations, tries=1,
+            start=(started - INCA_MAX_AGE).isoformat(timespec="minutes"),
+            end=started.isoformat(timespec="minutes"),
+        )
+    except urllib.error.HTTPError as err:
+        if err.code == 400 and b"outside of dataset bounds" in err.read():
+            if len(stations) == 1:
+                return {stations[0]["id"]: (None, "grid_gap")}
+            mid = len(stations) // 2
+            return fetch_inca(stations[:mid], started, errors) | fetch_inca(stations[mid:], started, errors)
+        errors.append(f"inca: {err!r}")
+    except Exception as err:  # Teilausfälle protokollieren
+        errors.append(f"inca: {err!r}")
+    else:
+        return {station["id"]: (data, "missing") for station in stations}
+    return {station["id"]: (None, "fetch_error") for station in stations}
 
 
 def fetch_obs(stations: list[dict], end: datetime) -> dict:
@@ -89,34 +207,71 @@ def fetch_obs(stations: list[dict], end: datetime) -> dict:
         "output_format": "geojson",
     })
     data = fetch(f"{BASE}/station/historical/tawes-v1-10min?{query}")
-    values = {}
+    values, locations = {}, {}
     for feature in data["features"]:
         sid = str(feature["properties"]["station"])
         values[sid] = {p: v["data"] for p, v in feature["properties"]["parameters"].items()}
-    return {"times": data["timestamps"], "values": values}
+        geometry = feature.get("geometry")
+        if geometry:
+            lon, lat = geometry["coordinates"][:2]
+            locations[sid] = [lat, lon]
+    return {"times": data["timestamps"], "values": values, "locations": locations}
 
 
 def collect(data_dir: Path, stations_file: Path) -> int:
     stations = json.loads(stations_file.read_text("utf-8"))
     now = datetime.now(timezone.utc)
     run: dict = {
-        "version": 1,
+        "version": 2,
         "fetched_at": now.isoformat(timespec="seconds"),
+        "stations": stations,
         "nowcast": None, "nwp": None, "obs": None, "errors": [],
     }
-    for key, (model, params), keep in (("nowcast", NOWCAST, None), ("nwp", NWP, NWP_STEPS)):
+    # Beide Requests gehören zum selben Abruf. Ein späterer Retry könnte
+    # bereits einen anderen Forecast-Lauf oder eine neue Analyse liefern.
+    inca_errors: list[str] = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        inca_task = pool.submit(fetch_inca, stations, now, inca_errors)
         try:
-            run[key] = fetch_forecast(model, params, stations, keep)
-        except Exception as err:  # noqa: BLE001 - ein Teilausfall soll den Lauf nicht abbrechen
-            run["errors"].append(f"{key}: {err!r}")
-            print(f"::warning::{key} fehlgeschlagen: {err!r}")
-        time.sleep(1)
+            nwp = fetch_forecast(*NWP, stations, tries=1)
+        except Exception as err:  # Teilausfälle protokollieren
+            nwp = None
+            run["errors"].append(f"nwp: {err!r}")
+        inca = inca_task.result()
+    sampled = datetime.now(timezone.utc)
+    run["errors"].extend(inca_errors)
+    run["comparison"] = {
+        "sampled_at": sampled.isoformat(timespec="milliseconds"),
+        "forecast": {
+            sid: candidates(NWP[0], sid, sampled, nwp, "fetch_error" if nwp is None else "missing")
+            for sid in inca
+        },
+        "inca": {
+            sid: candidates(INCA[0], sid, sampled, data, status)
+            for sid, (data, status) in inca.items()
+        },
+    }
+    if nwp is None:
+        # Die Vorhersage-Zeitreihe darf nachgeladen werden. Der Kandidat für
+        # den INCA-Vergleich bleibt der bereits protokollierte Abruffehler.
+        try:
+            nwp = fetch_forecast(*NWP, stations)
+        except Exception as err:
+            run["errors"].append(f"nwp (Vorhersagearchiv): {err!r}")
+    if nwp:
+        run["nwp"] = trim_forecast(nwp, NWP_STEPS)
+    try:
+        run["nowcast"] = fetch_forecast(*NOWCAST, stations)
+    except Exception as err:
+        run["errors"].append(f"nowcast: {err!r}")
+    time.sleep(1)
     end = now.replace(minute=now.minute - now.minute % 10, second=0, microsecond=0)
     try:
         run["obs"] = fetch_obs(stations, end)
     except Exception as err:  # noqa: BLE001
         run["errors"].append(f"obs: {err!r}")
-        print(f"::warning::obs fehlgeschlagen: {err!r}")
+    for error in run["errors"]:
+        print(f"::warning::{error}")
 
     path = data_dir / f"{now:%Y}" / f"{now:%m}" / f"{now:%d}" / f"run_{now:%H%M}.json.gz"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -128,6 +283,8 @@ def collect(data_dir: Path, stations_file: Path) -> int:
         copy.write_text(stations_file.read_text("utf-8"), "utf-8")
 
     ok = [k for k in ("nowcast", "nwp", "obs") if run[k]]
+    if any(result["retrieved_at"] for result in run["comparison"]["inca"].values()):
+        ok.append("inca")
     print(f"{path}  ok={ok}  fehler={len(run['errors'])}  {path.stat().st_size / 1024:.1f} KiB")
     return 0 if ok else 1
 
