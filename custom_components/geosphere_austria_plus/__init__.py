@@ -21,8 +21,10 @@ from .const import (
     CONF_LONGITUDE,
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
+    CONF_ENABLE_INCA,
     CONF_ENABLE_OPEN_METEO,
     DATA_CURRENT,
+    DATA_INCA,
     DATA_FORECASTS,
     DATA_WARNINGS,
     DATA_AIR_QUALITY,
@@ -33,6 +35,7 @@ from .const import (
 from .coordinator import (
     GeoSphereCurrentCoordinator,
     GeoSphereForecastCoordinator,
+    GeoSphereIncaCoordinator,
     GeoSphereWarningsCoordinator,
     GeoSphereAirQualityCoordinator,
     GeoSphereOpenMeteoDailyCoordinator,
@@ -163,6 +166,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_ENABLE_OPEN_METEO,
         entry.data.get(CONF_ENABLE_OPEN_METEO, False),
     )
+    enable_inca: bool = entry.options.get(
+        CONF_ENABLE_INCA, entry.data.get(CONF_ENABLE_INCA, False)
+    )
 
     coordinators: dict[str, Any] = {DATA_FORECASTS: {}}
 
@@ -185,6 +191,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         fc = GeoSphereForecastCoordinator(hass, lat, lon, model)
         await fc.async_config_entry_first_refresh()
         coordinators[DATA_FORECASTS][model] = fc
+
+    if enable_inca and not station_id:
+        inca_coordinator = GeoSphereIncaCoordinator(hass, entry, lat, lon)
+        # Der Forecast-Fallback funktioniert auch bei einem Fehler beim ersten
+        # Abruf. Der Coordinator bleibt für spätere Updates registriert.
+        await inca_coordinator.async_refresh()
+        coordinators[DATA_INCA] = inca_coordinator
 
     # Warnungs-Koordinator (optional, konfigurierbar)
     if enable_warnings:

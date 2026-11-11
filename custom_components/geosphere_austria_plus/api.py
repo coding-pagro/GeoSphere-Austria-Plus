@@ -5,6 +5,7 @@ import asyncio
 import logging
 import math
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -23,11 +24,26 @@ from .const import (
     WARNINGS_API_BASE,
     CHEM_RESOURCE,
     CHEM_PARAMS,
+    INCA_MAX_AGE,
+    INCA_RESOURCE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 TIMEOUT = aiohttp.ClientTimeout(total=30)
+
+# Dieselben Schlüssel wie bei TAWES, damit die aktuellen Wetterattribute die
+# Quellen einheitlich lesen können. RR ist bei INCA eine Stundensumme.
+_INCA_CURRENT_FIELDS = {"2t": "TL", "2d": "TP", "2r": "RF", "tp": "RR"}
+_INCA_PARAMS = ",".join((*_INCA_CURRENT_FIELDS, "10u", "10v", "msl"))
+
+
+@dataclass(frozen=True)
+class IncaAnalysis:
+    """Aktuelle Werte eines einzelnen INCA-Analysepunkts."""
+
+    timestamp: datetime
+    values: dict[str, float]
 
 
 class GeoSphereApiError(Exception):
@@ -108,6 +124,76 @@ class GeoSphereApi:
             return self._parse_station_geojson(data, station_id)
 
         raise GeoSphereApiError(f"Fehler beim Abrufen aktueller Daten für Station {station_id}")
+
+    async def get_inca_current(self, lat: float, lon: float) -> IncaAnalysis | None:
+        """Jüngste frische INCA-Analyse für einen Koordinatenpunkt abrufen."""
+        now = datetime.now(timezone.utc)
+        oldest = now - INCA_MAX_AGE
+        start = oldest.isoformat(timespec="minutes")
+        end = now.isoformat(timespec="minutes")
+        url = f"{API_BASE}/timeseries/historical/{INCA_RESOURCE}"
+        params = {
+            "parameters": _INCA_PARAMS,
+            "lat_lon": f"{lat},{lon}",
+            "start": start,
+            "end": end,
+            "output_format": "geojson",
+        }
+        try:
+            async with self._session.get(url, params=params, timeout=TIMEOUT) as resp:
+                if resp.status == 400:
+                    body = await resp.json(content_type=None)
+                    detail = body.get("detail") if isinstance(body, dict) else None
+                    if isinstance(detail, str) and "outside of dataset bounds" in detail:
+                        return None
+                resp.raise_for_status()
+                data = await resp.json(content_type=None)
+            entries = self._parse_forecast_geojson(data)
+        except (
+            aiohttp.ClientError, TimeoutError, ValueError,
+            TypeError, AttributeError, KeyError, IndexError,
+        ) as err:
+            raise GeoSphereApiError(f"Fehler beim Abrufen der INCA-Analyse: {err}") from err
+
+        latest_time = None
+        latest_entry = None
+        for entry in entries:
+            raw_time = entry.get("datetime")
+            if not isinstance(raw_time, str):
+                continue
+            try:
+                timestamp = datetime.fromisoformat(raw_time)
+            except ValueError:
+                continue
+            if timestamp.tzinfo is None or not oldest <= timestamp <= now:
+                continue
+            if latest_time is None or timestamp > latest_time:
+                latest_time, latest_entry = timestamp, entry
+
+        if latest_time is None or latest_entry is None:
+            return None
+
+        # 2r is returned as percent despite the API unit label "1".
+        # tp is kg/m² of water equivalent, numerically the same as mm.
+        numbers = {
+            key: float(value)
+            for key, value in latest_entry.items()
+            if type(value) in (int, float) and math.isfinite(value)
+        }
+        values = {
+            current_key: numbers[api_key]
+            for api_key, current_key in _INCA_CURRENT_FIELDS.items()
+            if api_key in numbers
+        }
+        if "msl" in numbers:
+            values["PRED"] = round(numbers["msl"] / 100, 1)
+        if "10u" in numbers and "10v" in numbers:
+            u, v = numbers["10u"], numbers["10v"]
+            values["FF"] = math.hypot(u, v)
+            if u or v:
+                values["DD"] = (math.degrees(math.atan2(u, v)) + 180) % 360
+
+        return IncaAnalysis(latest_time, values) if values else None
 
     @staticmethod
     def _normalize_v2_params(
@@ -309,7 +395,7 @@ class GeoSphereApi:
 
     def _parse_forecast_geojson(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """
-        NWP GeoJSON → Liste von Zeitschritt-Dicts.
+        Zeitreihen-GeoJSON → Liste von Zeitschritt-Dicts.
         Jedes Dict hat 'datetime' + alle Parameter als Schlüssel.
 
         Die API liefert Zeitstempel auf oberster Ebene unter 'timestamps',

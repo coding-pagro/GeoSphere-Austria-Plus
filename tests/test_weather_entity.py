@@ -4,6 +4,8 @@ import pytest
 from datetime import date, datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from custom_components.geosphere_austria_plus.api import IncaAnalysis
+from custom_components.geosphere_austria_plus.const import DATA_FORECASTS, DATA_INCA, DOMAIN
 from custom_components.geosphere_austria_plus.weather import GeoSphereWeatherEntity
 
 
@@ -321,6 +323,77 @@ class TestForecastFallbackProperties:
 # ---------------------------------------------------------------------------
 # _is_daytime (sun.sun integration)
 # ---------------------------------------------------------------------------
+
+class TestIncaWeather:
+    @pytest.fixture
+    def inca(self):
+        return MagicMock(last_update_success=True, data=IncaAnalysis(
+            datetime.now(timezone.utc),
+            {"TL": 0.0, "TP": -3.0, "FF": 0.0, "RR": 0.0},
+        ))
+
+    @pytest.fixture
+    def with_inca(self, forecast_coord, inca):
+        forecast_coord.data = [_future_entry(
+            t2m=8.0, rh2m=75.0, rain_acc=1.0, pressure=1010.0,
+            u10m=0.0, v10m=5.0, wind_gust_speed=12.0, sy=9,
+        )]
+        return GeoSphereWeatherEntity(
+            current_coordinator=None, forecast_coordinator=forecast_coord,
+            entry_id="test", model="nwp-v2-1h-1km", location_name="Wien",
+            inca_coordinator=inca,
+        )
+
+    def test_partial_analysis_uses_forecast_per_field(self, with_inca):
+        assert with_inca.native_temperature == 0.0
+        assert with_inca.native_dew_point == -3.0
+        assert with_inca.native_wind_speed == 0.0
+        assert with_inca.native_precipitation == 0.0
+        assert with_inca.extra_state_attributes == {"precipitation_mm": 0.0}
+        assert with_inca.humidity == 75.0
+        assert with_inca.native_pressure == 1010.0
+        assert with_inca.wind_bearing == 180.0
+        assert with_inca.native_wind_gust_speed == 12.0
+        assert with_inca.condition == with_inca._condition_from_forecast()
+
+    @pytest.mark.parametrize("failure", ["expired", "outside", "api"])
+    def test_falls_back_when_analysis_unusable(self, with_inca, inca, failure):
+        if failure == "expired":
+            inca.data = IncaAnalysis(
+                inca.data.timestamp - timedelta(hours=3), inca.data.values
+            )
+        elif failure == "outside":
+            inca.data = None
+        else:
+            # HA retains the previous successful data after an UpdateFailed.
+            inca.last_update_success = False
+        assert with_inca.native_temperature == 8.0
+        assert with_inca.native_dew_point is None
+        assert with_inca.native_precipitation == 1.0
+        assert with_inca.extra_state_attributes == {"precipitation_mm": 1.0}
+
+    async def test_subscribes_to_inca_updates(self, with_inca, inca):
+        with patch.object(with_inca, "async_on_remove") as on_remove:
+            await with_inca.async_added_to_hass()
+        inca.async_add_listener.assert_called_once_with(with_inca.async_write_ha_state)
+        on_remove.assert_called_once_with(inca.async_add_listener.return_value)
+
+    async def test_registers_current_only_entity_without_models(self, inca):
+        from custom_components.geosphere_austria_plus.weather import async_setup_entry
+
+        entry = MagicMock(entry_id="test", title="Wien", data={"forecast_models": []}, options={})
+        hass = MagicMock(data={DOMAIN: {entry.entry_id: {DATA_FORECASTS: {}, DATA_INCA: inca}}})
+        add_entities = MagicMock()
+        await async_setup_entry(hass, entry, add_entities)
+
+        (entity,) = add_entities.call_args.args[0]
+        assert entity.supported_features == 0
+        assert entity.native_temperature == 0.0
+        assert entity.humidity is None
+        assert entity.available
+        inca.data = None
+        assert not entity.available
+
 
 class TestIsDaytime:
     def test_uses_sun_entity_above_horizon(self, entity, current_coord):

@@ -1,6 +1,7 @@
 """Tests für Coordinator-Fallback und Fibonacci-Retry bei API-Fehlern."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -13,16 +14,32 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator as _B
 from custom_components.geosphere_austria_plus.coordinator import (
     GeoSphereCurrentCoordinator,
     GeoSphereForecastCoordinator,
+    GeoSphereIncaCoordinator,
     GeoSphereWarningsCoordinator,
     GeoSphereAirQualityCoordinator,
     _RETRY_INTERVALS,
 )
-from custom_components.geosphere_austria_plus.api import GeoSphereApiError
+from custom_components.geosphere_austria_plus.api import GeoSphereApiError, IncaAnalysis
 
 
 # ---------------------------------------------------------------------------
 # Hilfsfunktion
 # ---------------------------------------------------------------------------
+
+async def test_inca_coordinator_can_recover_from_api_error():
+    analysis = IncaAnalysis(datetime.now(timezone.utc), {"TL": 5.6})
+    coordinator = GeoSphereIncaCoordinator(MagicMock(), MagicMock(), 48.208, 16.373)
+    with patch.object(
+        coordinator._api, "get_inca_current",
+        new_callable=AsyncMock, side_effect=[GeoSphereApiError("timeout"), analysis, None],
+    ) as get_inca:
+        with pytest.raises(_UpdateFailed) as error:
+            await coordinator._async_update_data()
+        assert error.value.translation_key == "inca_api_error"
+        assert await coordinator._async_update_data() == analysis
+        assert await coordinator._async_update_data() is None
+    assert get_inca.await_args_list == [call(48.208, 16.373)] * 3
+
 
 def _make_coordinator(cls, **kwargs):
     """Erstellt einen Koordinator mit gemocktem hass und API."""

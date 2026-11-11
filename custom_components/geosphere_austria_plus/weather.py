@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any, cast
@@ -35,15 +36,19 @@ from .const import (
     CONF_OPEN_METEO_FORECAST_DAYS,
     DATA_CURRENT,
     DATA_FORECASTS,
+    DATA_INCA,
     DATA_OPEN_METEO_DAILY,
     DEFAULT_FORECAST_MODEL,
     FORECAST_MODEL_LABELS,
+    INCA_MAX_AGE,
+    INCA_RESOURCE,
     OPEN_METEO_DAY_COVERAGE_HOUR,
     OPEN_METEO_FORECAST_DAYS_DEFAULT,
 )
 from .coordinator import (
     GeoSphereCurrentCoordinator,
     GeoSphereForecastCoordinator,
+    GeoSphereIncaCoordinator,
     GeoSphereOpenMeteoDailyCoordinator,
 )
 
@@ -201,6 +206,7 @@ async def async_setup_entry(
         models = [entry.data.get(CONF_FORECAST_MODEL, DEFAULT_FORECAST_MODEL)]
 
     current_coordinator: GeoSphereCurrentCoordinator | None = coordinators.get(DATA_CURRENT)
+    inca_coordinator: GeoSphereIncaCoordinator | None = coordinators.get(DATA_INCA)
     open_meteo_coordinator: GeoSphereOpenMeteoDailyCoordinator | None = coordinators.get(DATA_OPEN_METEO_DAILY)
 
     all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] = coordinators[DATA_FORECASTS]
@@ -223,9 +229,20 @@ async def async_setup_entry(
             all_forecast_coordinators=all_forecast_coordinators,
             open_meteo_coordinator=open_meteo_coordinator,
             open_meteo_forecast_days=open_meteo_forecast_days,
+            inca_coordinator=inca_coordinator,
         )
         for model in models
     ]
+    if not models and inca_coordinator is not None:
+        entities.append(GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=None,
+            entry_id=entry_id,
+            model=INCA_RESOURCE,
+            location_name=location_name,
+            lon=lon,
+            inca_coordinator=inca_coordinator,
+        ))
 
     # Aktive unique_ids für spätere Cleanup-Logik registrieren
     coordinators.setdefault("_active_unique_ids", set()).update(
@@ -236,14 +253,9 @@ async def async_setup_entry(
 
 
 class GeoSphereWeatherEntity(
-    CoordinatorEntity[GeoSphereForecastCoordinator], WeatherEntity
+    CoordinatorEntity[GeoSphereForecastCoordinator | GeoSphereIncaCoordinator], WeatherEntity
 ):
-    """Wetter-Entität mit Conditions und stündlicher/täglicher Vorhersage.
-
-    Der Forecast-Koordinator ist immer verfügbar (primär).
-    Der Current-Koordinator (TAWES-Station) ist optional — ohne ihn wird
-    der aktuelle Zustand aus dem ersten Vorhersagepunkt abgeleitet.
-    """
+    """Wetterentität mit aktuellen Werten aus TAWES, INCA oder dem Forecast."""
 
     _attr_has_entity_name = True
     _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
@@ -254,7 +266,7 @@ class GeoSphereWeatherEntity(
     def __init__(
         self,
         current_coordinator: GeoSphereCurrentCoordinator | None,
-        forecast_coordinator: GeoSphereForecastCoordinator,
+        forecast_coordinator: GeoSphereForecastCoordinator | None,
         entry_id: str,
         model: str,
         location_name: str,
@@ -262,9 +274,15 @@ class GeoSphereWeatherEntity(
         all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] | None = None,
         open_meteo_coordinator: GeoSphereOpenMeteoDailyCoordinator | None = None,
         open_meteo_forecast_days: int = OPEN_METEO_FORECAST_DAYS_DEFAULT,
+        inca_coordinator: GeoSphereIncaCoordinator | None = None,
     ) -> None:
-        super().__init__(forecast_coordinator)
+        primary_coordinator = forecast_coordinator or inca_coordinator
+        if primary_coordinator is None:
+            raise ValueError("Weather entity requires a forecast or INCA coordinator")
+        super().__init__(primary_coordinator)
+        self._forecast_coordinator = forecast_coordinator
         self._current_coordinator = current_coordinator
+        self._inca_coordinator = inca_coordinator
         self._open_meteo_coordinator = open_meteo_coordinator
         self._open_meteo_forecast_days = open_meteo_forecast_days
         self._model = model
@@ -279,7 +297,9 @@ class GeoSphereWeatherEntity(
         self._attr_name = FORECAST_MODEL_LABELS.get(model, model)
 
         # Nowcast liefert nur kurzfristige Stundendaten — kein Daily-Forecast.
-        if "nowcast" in model:
+        if forecast_coordinator is None:
+            self._attr_name = "INCA"
+        elif "nowcast" in model:
             self._attr_supported_features = WeatherEntityFeature.FORECAST_HOURLY
         else:
             self._attr_supported_features = (
@@ -301,19 +321,33 @@ class GeoSphereWeatherEntity(
             return f"{ATTRIBUTION}. {OPEN_METEO_ATTRIBUTION}"
         return ATTRIBUTION
 
+    @property
+    def available(self) -> bool:
+        return super().available and (
+            self._forecast_coordinator is not None or bool(self._current)
+        )
+
     # ------------------------------------------------------------------
     # Koordinator-Daten
     # ------------------------------------------------------------------
 
     @property
-    def _current(self) -> dict[str, Any]:
-        if self._current_coordinator is None:
-            return {}
-        return self._current_coordinator.data or {}
+    def _current(self) -> Mapping[str, Any]:
+        if self._current_coordinator is not None:
+            return self._current_coordinator.data or {}
+        if self._inca_coordinator is not None and self._inca_coordinator.last_update_success:
+            analysis = self._inca_coordinator.data
+            if analysis is not None and (
+                timedelta(0) <= datetime.now(timezone.utc) - analysis.timestamp <= INCA_MAX_AGE
+            ):
+                return analysis.values
+        return {}
 
     @property
     def _forecast_raw(self) -> list[dict[str, Any]]:
-        return self.coordinator.data or []
+        if self._forecast_coordinator is None:
+            return []
+        return self._forecast_coordinator.data or []
 
     @property
     def _first_forecast_entry(self) -> dict[str, Any] | None:
@@ -332,8 +366,7 @@ class GeoSphereWeatherEntity(
         return None
 
     # ------------------------------------------------------------------
-    # Aktuelle Werte – aus TAWES wenn vorhanden, sonst aus erstem
-    # Vorhersagepunkt (Fallback ohne konfigurierte Station).
+    # Aktuelle Werte aus TAWES oder INCA mit feldweisem Forecast-Fallback.
     # Kein Forecast-Äquivalent: Taupunkt.
     # ------------------------------------------------------------------
 
@@ -424,6 +457,13 @@ class GeoSphereWeatherEntity(
         if rain == 0.0 and snow == 0.0:
             return None
         return rain + snow
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Publish current precipitation for INCA-enabled entities."""
+        if self._inca_coordinator is not None and (amount := self.native_precipitation) is not None:
+            return {"precipitation_mm": amount}
+        return None
 
     # ------------------------------------------------------------------
     # Condition – aus TAWES abgeleitet wenn vorhanden, sonst aus Forecast
@@ -939,6 +979,10 @@ class GeoSphereWeatherEntity(
         if self._current_coordinator is not None:
             self.async_on_remove(
                 self._current_coordinator.async_add_listener(self.async_write_ha_state)
+            )
+        if self._inca_coordinator is not None and self._forecast_coordinator is not None:
+            self.async_on_remove(
+                self._inca_coordinator.async_add_listener(self.async_write_ha_state)
             )
         if self._open_meteo_coordinator is not None:
             self.async_on_remove(

@@ -17,6 +17,7 @@ from custom_components.geosphere_austria_plus.const import (
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
     CONF_ENABLE_OPEN_METEO,
+    CONF_ENABLE_INCA,
 )
 
 _DEFAULT_LAT = 48.21
@@ -63,6 +64,11 @@ async def _call(fake, user_input):
 
 
 class TestOptionsFlowInit:
+    async def test_inca_preference_saved_in_options(self):
+        fake = _FakeOptionsFlow()
+        result = await _call(fake, {**_BASE_USER_INPUT, CONF_ENABLE_INCA: True})
+        assert result["data"][CONF_ENABLE_INCA] is True
+
     async def test_shows_form_when_no_input(self):
         result = await _call(_FakeOptionsFlow(), user_input=None)
         assert result["type"] == "form"
@@ -281,6 +287,12 @@ async def _call_user(fake, user_input):
 
 
 class TestConfigFlowUserStep:
+    @pytest.mark.parametrize("preference", [{}, {CONF_ENABLE_INCA: True}])
+    async def test_inca_defaults_off_and_can_be_enabled(self, preference):
+        fake = _FakeConfigFlow(stations=[_VALID_STATION])
+        result = await _call_user(fake, {**_BASE_USER_INPUT, **preference})
+        assert result["data"][CONF_ENABLE_INCA] is bool(preference)
+
     async def test_shows_form_when_no_input(self):
         fake = _FakeConfigFlow(stations=[_VALID_STATION])
         result = await _call_user(fake, user_input=None)
@@ -356,8 +368,8 @@ class _FakeReconfigureFlow(_FakeConfigFlow):
     def _abort_if_unique_id_mismatch(self, reason="reconfigure_unique_id_mismatch"):
         self._mismatch_called = True
 
-    def async_update_reload_and_abort(self, entry, data=None, title=None):
-        self._update_args = {"entry": entry, "data": data, "title": title}
+    def async_update_reload_and_abort(self, entry, data=None, title=None, options=None):
+        self._update_args = {"entry": entry, "data": data, "title": title, "options": options}
         return {"type": "abort", "reason": "reconfigure_successful"}
 
     def _build_schema_with_defaults(self, entry):
@@ -367,6 +379,18 @@ class _FakeReconfigureFlow(_FakeConfigFlow):
 class TestReconfigureFlow:
     """Gold-Tier: async_step_reconfigure ermöglicht User-Änderungen
     am bestehenden Eintrag ohne Lösch-Re-Setup."""
+
+    async def test_updates_inca_preference_when_options_override_entry(self):
+        fake = _FakeReconfigureFlow(
+            entry_data=_BASE_USER_INPUT,
+            entry_options={CONF_ENABLE_INCA: False, CONF_STATION_ID: "11035"},
+            stations=[_VALID_STATION],
+        )
+        await GeoSphereAustriaPlusConfigFlow.async_step_reconfigure(
+            fake, {**_BASE_USER_INPUT, CONF_ENABLE_INCA: True}
+        )
+        assert fake._update_args["options"][CONF_ENABLE_INCA] is True
+        assert fake._update_args["options"][CONF_STATION_ID] is None
 
     async def test_shows_form_with_defaults_from_entry(self):
         from custom_components.geosphere_austria_plus.config_flow import (

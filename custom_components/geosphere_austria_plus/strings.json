@@ -32,6 +32,7 @@
           "lat": "Latitude",
           "lon": "Longitude",
           "station_id": "TAWES Station (optional)",
+          "enable_inca": "Use INCA analysis for current weather without a TAWES station",
           "forecast_models": "Forecast models (select 0–3)",
           "enable_warnings": "Enable weather warnings",
           "enable_air_quality": "Enable air quality index",
@@ -54,6 +55,7 @@
           "lat": "Latitude",
           "lon": "Longitude",
           "station_id": "TAWES Station (optional)",
+          "enable_inca": "Use INCA analysis for current weather without a TAWES station",
           "forecast_models": "Forecast models (select 0–3)",
           "enable_warnings": "Enable weather warnings",
           "enable_air_quality": "Enable air quality index",
@@ -72,6 +74,7 @@
           "lat": "Latitude",
           "lon": "Longitude",
           "station_id": "TAWES Station (optional)",
+          "enable_inca": "Use INCA analysis for current weather without a TAWES station",
           "forecast_models": "Forecast models (select 0–3)",
           "enable_warnings": "Enable weather warnings",
           "enable_air_quality": "Enable air quality index",
@@ -102,6 +105,9 @@
   "exceptions": {
     "tawes_api_error": {
       "message": "GeoSphere TAWES station API error: {error}"
+    },
+    "inca_api_error": {
+      "message": "GeoSphere INCA API error: {error}"
     },
     "forecast_api_error": {
       "message": "GeoSphere forecast API error for model {model}: {error}"

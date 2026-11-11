@@ -1,7 +1,8 @@
 """Tests for GeoSphereApi – parsing methods (sync) and HTTP methods (async)."""
 import asyncio
+from datetime import datetime, timedelta, timezone
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 
@@ -27,6 +28,104 @@ def _make_mock_response(json_data: dict, *, raise_for_status=None):
     resp.__aenter__ = AsyncMock(return_value=resp)
     resp.__aexit__ = AsyncMock(return_value=False)
     return resp
+
+
+class TestIncaCurrent:
+    def _response(self, times, values):
+        return _make_mock_response({
+            "timestamps": times,
+            "features": [{
+                "properties": {
+                    "parameters": {key: {"data": data} for key, data in values.items()},
+                },
+            }],
+        })
+
+    async def test_selects_latest_fresh_analysis_and_converts_units(self):
+        api = _make_api()
+        now = datetime(2026, 11, 11, 9, 45, tzinfo=timezone.utc)
+        api._session.get.return_value = self._response(
+            ["2026-11-11T09:00Z", "2026-11-11T08:00+00:00", "2026-11-11T10:00Z"],
+            {
+                "2t": [5.6, 4.8, 8.0],
+                "2d": [1.6],
+                "2r": [75.25],
+                "10u": [-3.0],
+                "10v": [4.0],
+                "msl": [101100],
+                "tp": [0.0],
+            },
+        )
+        with patch("custom_components.geosphere_austria_plus.api.datetime", wraps=datetime) as clock:
+            clock.now.return_value = now
+            analysis = await api.get_inca_current(48.208, 16.373)
+
+        assert analysis.timestamp == now.replace(minute=0)
+        assert analysis.values == {
+            "TL": 5.6, "TP": 1.6, "RF": 75.25, "FF": 5.0,
+            "DD": pytest.approx(143.13, abs=0.01), "PRED": 1011.0, "RR": 0.0,
+        }
+        request = api._session.get.call_args
+        assert request.args[0].endswith("/timeseries/historical/inca-v2-1h-1km")
+        assert request.kwargs["params"] == {
+            "parameters": "2t,2d,2r,tp,10u,10v,msl",
+            "lat_lon": "48.208,16.373",
+            "start": "2026-11-11T07:45+00:00",
+            "end": "2026-11-11T09:45+00:00",
+            "output_format": "geojson",
+        }
+
+    async def test_partial_analysis_does_not_fill_from_older_sample(self):
+        api = _make_api()
+        now = datetime.now(timezone.utc)
+        api._session.get.return_value = self._response(
+            [(now - timedelta(hours=1)).isoformat(), now.isoformat()],
+            {
+                "2t": [5, 0],
+                "2d": [1.6, None],
+                "2r": [75, float("nan")],
+                "10u": [-3, 4],
+                "10v": [4],
+            },
+        )
+        analysis = await api.get_inca_current(48.208, 16.373)
+        assert analysis.values == {"TL": 0.0}
+
+    @pytest.mark.parametrize("timestamp", ["stale", "2026-11-11T09:00", "invalid"])
+    async def test_ignores_stale_or_invalid_analysis(self, timestamp):
+        api = _make_api()
+        if timestamp == "stale":
+            timestamp = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+        api._session.get.return_value = self._response([timestamp], {"2t": [5]})
+        assert await api.get_inca_current(48.208, 16.373) is None
+
+    async def test_outside_grid(self):
+        api = _make_api()
+        response = _make_mock_response({
+            "detail": "Requested point 40.0,12.0 is outside of dataset bounds!",
+        })
+        response.status = 400
+        api._session.get.return_value = response
+        assert await api.get_inca_current(40.0, 12.0) is None
+        response.raise_for_status.assert_not_called()
+
+    async def test_empty_features(self):
+        api = _make_api()
+        api._session.get.return_value = _make_mock_response({"features": []})
+        assert await api.get_inca_current(48.208, 16.373) is None
+
+    @pytest.mark.parametrize("error", [TimeoutError(), aiohttp.ClientConnectionError()])
+    async def test_request_error(self, error):
+        api = _make_api()
+        api._session.get.side_effect = error
+        with pytest.raises(GeoSphereApiError, match="INCA"):
+            await api.get_inca_current(48.208, 16.373)
+
+    async def test_malformed_json_payload(self):
+        api = _make_api()
+        api._session.get.return_value = _make_mock_response({"features": [None]})
+        with pytest.raises(GeoSphereApiError, match="INCA"):
+            await api.get_inca_current(48.208, 16.373)
 
 
 # ---------------------------------------------------------------------------

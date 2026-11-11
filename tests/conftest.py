@@ -35,6 +35,10 @@ class _MockWeatherEntityFeature:
 
 class _MockWeatherEntity:
     @property
+    def unique_id(self):
+        return self._attr_unique_id
+
+    @property
     def supported_features(self):
         """Mirror HA: derive from _attr_supported_features class/instance attribute."""
         return getattr(self, "_attr_supported_features", 0)
@@ -71,7 +75,7 @@ class _MockDataUpdateCoordinator:
     def __class_getitem__(cls, item):
         return cls
 
-    def __init__(self, hass=None, logger=None, name=None, update_interval=None):
+    def __init__(self, hass=None, logger=None, name=None, update_interval=None, *, config_entry=None):
         self.data = None
         self.hass = hass
 

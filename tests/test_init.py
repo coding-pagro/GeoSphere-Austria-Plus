@@ -8,6 +8,7 @@ from custom_components.geosphere_austria_plus.const import (
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
     CONF_ENABLE_OPEN_METEO,
+    CONF_ENABLE_INCA,
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_STATION_ID,
@@ -15,6 +16,7 @@ from custom_components.geosphere_austria_plus.const import (
     DATA_WARNINGS,
     DATA_AIR_QUALITY,
     DATA_CURRENT,
+    DATA_INCA,
     DATA_OPEN_METEO_DAILY,
     DOMAIN,
     DEFAULT_FORECAST_MODEL,
@@ -62,6 +64,43 @@ _BASE_DATA = {
     CONF_LONGITUDE: 16.37,
     CONF_FORECAST_MODELS: [DEFAULT_FORECAST_MODEL],
 }
+
+
+@pytest.mark.parametrize(
+    ("data_enabled", "options", "expected"),
+    [
+        (None, {}, False),
+        (True, {CONF_ENABLE_INCA: False}, False),
+        (True, {CONF_STATION_ID: "11035"}, False),
+        (False, {CONF_ENABLE_INCA: True, CONF_STATION_ID: ""}, True),
+    ],
+)
+async def test_inca_setup_is_opt_in_and_requires_no_station(data_enabled, options, expected):
+    from custom_components.geosphere_austria_plus import async_setup_entry
+
+    data = {
+        **_BASE_DATA,
+        CONF_FORECAST_MODELS: [],
+        CONF_ENABLE_WARNINGS: False,
+        CONF_ENABLE_AIR_QUALITY: False,
+    }
+    if data_enabled is not None:
+        data[CONF_ENABLE_INCA] = data_enabled
+    entry = _make_entry(data=data, options=options)
+    hass = _make_hass()
+    coordinator = MagicMock(async_refresh=AsyncMock())
+    with (
+        patch(f"{_PATCH_BASE}.GeoSphereIncaCoordinator", return_value=coordinator) as inca,
+        patch(f"{_PATCH_BASE}.GeoSphereCurrentCoordinator", return_value=_make_coordinator_mock()),
+        patch(f"{_PATCH_BASE}.er"),
+    ):
+        assert await async_setup_entry(hass, entry)
+    assert (DATA_INCA in hass.data[DOMAIN][entry.entry_id]) is expected
+    if expected:
+        inca.assert_called_once_with(hass, entry, 48.21, 16.37)
+        coordinator.async_refresh.assert_awaited_once()
+    else:
+        inca.assert_not_called()
 
 
 class TestWarningsCoordinatorConditional:

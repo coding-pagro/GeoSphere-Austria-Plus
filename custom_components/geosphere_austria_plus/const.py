@@ -1,6 +1,8 @@
 """Konstanten für GeoSphere Austria Plus."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 DOMAIN = "geosphere_austria_plus"
 CONF_NAME = "name"
 CONF_STATION_ID = "station_id"
@@ -10,9 +12,11 @@ CONF_LATITUDE = "lat"
 CONF_LONGITUDE = "lon"
 CONF_ENABLE_WARNINGS = "enable_warnings"
 CONF_ENABLE_AIR_QUALITY = "enable_air_quality"
+CONF_ENABLE_INCA = "enable_inca"
 
 # Keys für hass.data
 DATA_CURRENT = "current"
+DATA_INCA = "inca"
 DATA_FORECASTS = "forecasts"
 DATA_WARNINGS = "warnings"
 DATA_AIR_QUALITY = "air_quality"
@@ -48,6 +52,11 @@ AIR_QUALITY_UPDATE_INTERVAL = 60  # Minuten (Modell aktualisiert stündlich)
 # GeoSphere API
 API_BASE = "https://dataset.api.hub.geosphere.at/v1"
 WARNINGS_API_BASE = "https://warnungen.zamg.at/wsapp/api"
+
+# Stündliche INCA-Analyse (1 km)
+INCA_RESOURCE = "inca-v2-1h-1km"
+INCA_UPDATE_INTERVAL = 10  # Minuten, um neue Analysen zeitnah zu übernehmen
+INCA_MAX_AGE = timedelta(hours=2)
 
 # Schadstoffvorhersage (chem-v2-1h-3km)
 CHEM_RESOURCE = "chem-v2-1h-3km"

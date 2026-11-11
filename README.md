@@ -49,7 +49,21 @@ Die Integration fragt die TAWES-Station alle **10 Minuten** ab – dieselbe Anfr
 
 Alle Sensoren teilen sich dasselbe Gerät (Wetterstation) mit der Wetterentität und stehen sofort in Automationen, Dashboards und dem Energiemanagement zur Verfügung.
 
-> Die TAWES-Station ist optional. Ohne Station werden Temperatur, Feuchte, Windgeschwindigkeit, Windrichtung, Böen, Luftdruck und Niederschlag aus dem ersten Vorhersagepunkt des gewählten Modells abgeleitet. Der Taupunkt hat kein Modell-Äquivalent und bleibt in diesem Fall leer.
+### INCA-Analyse für Standorte ohne TAWES-Station
+
+Mit **INCA-Analyse für aktuelles Wetter ohne TAWES-Station verwenden** kommen die aktuellen Werte aus dem 1-km-Raster am konfigurierten Standort. Die Option ist standardmäßig ausgeschaltet. Die Integration fragt alle 10 Minuten die jüngste stündliche Analyse ab. Ihr UTC-Zeitstempel darf höchstens **zwei Stunden** zurückliegen.
+
+| Aktueller Wert | INCA-v2-Feld und Einheit |
+|---|---|
+| Temperatur und Taupunkt | `2t` und `2d` in °C |
+| Relative Luftfeuchtigkeit | `2r` in % |
+| Windgeschwindigkeit und Windrichtung | aus `10u` und `10v` in m/s berechnet |
+| Luftdruck auf Meereshöhe | `msl`, umgerechnet von Pa in hPa |
+| Niederschlag (`precipitation_mm`) | `tp` als Stundensumme in mm Wasseräquivalent |
+
+Bei fehlenden Feldern, älteren Analysen, API-Fehlern oder Standorten außerhalb des Rasters ergänzt die Integration jeden verfügbaren Wert aus dem ersten gültigen Vorhersagepunkt des jeweiligen Modells. Der Taupunkt bleibt ohne gültigen INCA-Wert leer. Wetterzustand und Böen kommen aus der Vorhersage. [INCA-v2 im GeoSphere DataHub](https://data.hub.geosphere.at/dataset/inca-v2-1h-1km)
+
+Ideenbeitrag von [slettmayer](https://github.com/slettmayer) durch die INCA-Nutzung in [GeoSphere Austria Next](https://github.com/slettmayer/ha-geosphere-next#entities).
 
 ### Wetterwarnungen
 
@@ -80,7 +94,7 @@ Vier stündliche Schadstoffsensoren (NO₂, O₃, PM10, PM2.5 in µg/m³) sowie 
 
 **Empfehlung:** Für den Alltagseinsatz empfiehlt sich **NWP** (Standard). **Ensemble** liefert verlässlichere Tendenzen mit weniger Ausreißern. **Nowcast** ist sinnvoll, wenn es primär darum geht, ob es in den nächsten 1–2 Stunden regnet.
 
-Es können auch **0 Modelle** gewählt werden – in diesem Fall wird keine Wetterentität angelegt.
+Bei **0 Modellen** und aktivierter INCA-Analyse für einen Standort ohne TAWES-Station erscheint eine INCA-Wetterentität mit aktuellen Werten. Wetterzustand, Böen und Vorhersagen bleiben bei dieser Entität leer.
 
 > **Umstellung auf v2 (November 2026):** GeoSphere hat die Modelle `nwp-v1-1h-2500m` und `ensemble-v1-1h-2500m` am 04.11.2026 eingestellt. Bestehende Einträge werden beim Update automatisch auf die v2-Nachfolger umgestellt. Die Entity-IDs der Wetterentitäten bleiben dabei erhalten.
 
@@ -104,6 +118,7 @@ Es können auch **0 Modelle** gewählt werden – in diesem Fall wird keine Wett
 | Breitengrad | Geografische Breite des Standorts | `48.249` |
 | Längengrad | Geografische Länge des Standorts | `16.356` |
 | TAWES-Station | Nächste Wetterstation (optional) | `11035` (Wien/Hohe Warte) |
+| INCA-Analyse | Aktuelle Werte am Standort ohne TAWES-Station | ❌ (opt-in) |
 | Vorhersagemodelle | 0–3 Modelle (NWP, Ensemble, Nowcast) | NWP (Standard) |
 | Wetterwarnungen | Warnungs-Sensor aktivieren | ✅ (Standard) |
 | Luftqualität | Luftqualitäts-Sensoren aktivieren | ✅ (Standard) |
@@ -148,7 +163,7 @@ Die Condition wird aus den TAWES-Echtzeitdaten abgeleitet (Priorität höchste z
 | 8 | `windy` | FF ≥ 10 m/s |
 | 9 | `sunny` / `clear-night` | Default |
 
-Ist keine TAWES-Station konfiguriert, werden alle aktuellen Werte (Condition, Temperatur, Feuchte, Wind, Niederschlag) aus dem ersten verfügbaren Vorhersagepunkt abgeleitet. Der Taupunkt bleibt leer, da die Modelle ihn nicht liefern; beim Nowcast fehlt zusätzlich der Luftdruck.
+Ohne TAWES-Station stammt die Condition aus dem ersten gültigen Vorhersagepunkt. Dieser liefert standardmäßig auch die verfügbaren aktuellen Werte. Bei aktivierter INCA-Analyse haben frische Analysewerte für die oben aufgeführten Felder Vorrang.
 
 Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32 Codes inkl. Gewitter), sowie Wolkenbedeckung (`tcc`), Niederschlag (`rain_acc`, `snow_acc`) und Wind aus dem NWP-Modell verwendet. Bei stündlichen Vorhersagen wird `sy` direkt verwendet; für Tagesvorhersagen wird der ungünstigste (signifikanteste) `sy`-Code der Tagesstunden herangezogen. Akkumulierte Niederschlagssummen können die symbolbasierte Bedingung überschreiben, jedoch nicht `lightning-rainy` abstufen. Hohe Windgeschwindigkeiten (≥ 10 m/s) ergeben `windy` bzw. `windy-variant` bei klaren oder bewölkten Bedingungen.
 
@@ -177,7 +192,7 @@ Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Lu
 
 ## Robustheit gegen API-Ausfälle
 
-Die GeoSphere-API ist gelegentlich nicht erreichbar. Damit Sensoren nicht für Stunden auf *„nicht verfügbar"* fallen, hat jeder Coordinator einen **Last-known-good-Cache**: Bei einem temporären API-Fehler werden die zuletzt erfolgreichen Daten weiter geliefert (eingefroren bis zum nächsten erfolgreichen Refresh).
+Die Koordinatoren für TAWES, Vorhersagen, Warnungen, Luftqualität und Open-Meteo verwenden bei einem temporären API-Fehler die zuletzt erfolgreich abgerufenen Daten. Bei einem INCA-Ausfall liefert die Vorhersage die aktuellen Werte, soweit sie verfügbar sind.
 
 Zusätzlich planen die Coordinatoren bei einem Fehler beschleunigte Wiederholversuche mit Fibonacci-Abständen: **1 → 2 → 3 → 5 → 8 → 13 → 21 → 30 min** (Maximum). Sobald die API wieder antwortet, fällt der Backoff zurück auf das reguläre Polling-Intervall (10 min für TAWES, 60 min für Vorhersage).
 
@@ -190,12 +205,11 @@ Die Integration ist ein reines **Cloud-Polling**-Modul — sie hält keine offen
 | Datenquelle | Intervall | Wann sinnvoll |
 |---|---|---|
 | TAWES (aktuelle Messwerte) | **10 Minuten** | Stationsdaten ändern sich nicht häufiger |
+| INCA (optional) | **10 Minuten** | Der DataHub veröffentlicht stündlich eine neue Analyse |
 | NWP/Ensemble/Nowcast (Vorhersage) | **60 Minuten** | NWP/Ensemble rechnen alle 3 h neu, Nowcast häufiger |
 | Wetterwarnungen | **15 Minuten** | Reaktiver Push für neue Warnungen ist nicht verfügbar |
 | Luftqualität (chem-v2-1h-3km) | **60 Minuten** | Modell publiziert stündlich |
 | Open-Meteo (optional) | **60 Minuten** | Tagesverlängerung |
-
-Bei API-Fehlern liefern alle Koordinatoren die letzten erfolgreichen Daten weiter und versuchen einen beschleunigten Refresh mit Fibonacci-Backoff (siehe [Robustheit](#robustheit-gegen-api-ausfälle)).
 
 ---
 

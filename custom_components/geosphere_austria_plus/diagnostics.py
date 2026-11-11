@@ -13,6 +13,7 @@ from .const import (
     DATA_AIR_QUALITY,
     DATA_CURRENT,
     DATA_FORECASTS,
+    DATA_INCA,
     DATA_OPEN_METEO_DAILY,
     DATA_WARNINGS,
     DOMAIN,
@@ -77,7 +78,7 @@ async def async_get_config_entry_diagnostics(
             model: _coordinator_snapshot(coord) for model, coord in forecasts.items()
         }
 
-    for key in (DATA_WARNINGS, DATA_AIR_QUALITY, DATA_OPEN_METEO_DAILY):
+    for key in (DATA_INCA, DATA_WARNINGS, DATA_AIR_QUALITY, DATA_OPEN_METEO_DAILY):
         coord = coordinators.get(key)
         if coord is not None:
             coord_diagnostics[key] = _coordinator_snapshot(coord)

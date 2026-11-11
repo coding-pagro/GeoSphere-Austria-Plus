@@ -8,14 +8,16 @@ from typing import Any, cast
 
 import aiohttp
 from homeassistant.core import CoreState, HomeAssistant, callback
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import GeoSphereApi, GeoSphereApiError
+from .api import GeoSphereApi, GeoSphereApiError, IncaAnalysis
 from .const import (
     DOMAIN,
     CURRENT_UPDATE_INTERVAL,
+    INCA_UPDATE_INTERVAL,
     FORECAST_UPDATE_INTERVAL,
     WARNINGS_UPDATE_INTERVAL,
     AIR_QUALITY_UPDATE_INTERVAL,
@@ -135,6 +137,34 @@ class GeoSphereCurrentCoordinator(_RetryMixin, DataUpdateCoordinator[dict[str, A
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="tawes_api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
+
+
+class GeoSphereIncaCoordinator(DataUpdateCoordinator[IncaAnalysis | None]):
+    """Stündliche INCA-Analyse für einen Standort ohne Station."""
+
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, lat: float, lon: float
+    ) -> None:
+        self.lat = lat
+        self.lon = lon
+        self._api = GeoSphereApi(async_get_clientsession(hass))
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=entry,
+            name=f"{DOMAIN}_inca_{entry.entry_id}",
+            update_interval=timedelta(minutes=INCA_UPDATE_INTERVAL),
+        )
+
+    async def _async_update_data(self) -> IncaAnalysis | None:
+        try:
+            return await self._api.get_inca_current(self.lat, self.lon)
+        except GeoSphereApiError as err:
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="inca_api_error",
                 translation_placeholders={"error": str(err)},
             ) from err
 

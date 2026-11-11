@@ -32,6 +32,7 @@ from .const import (
     CONF_LONGITUDE,
     CONF_ENABLE_WARNINGS,
     CONF_ENABLE_AIR_QUALITY,
+    CONF_ENABLE_INCA,
     CONF_ENABLE_OPEN_METEO,
     CONF_OPEN_METEO_FORECAST_DAYS,
     FORECAST_MODELS,
@@ -75,6 +76,7 @@ def _parse_user_input(user_input: dict[str, Any], default_name: str) -> dict[str
         CONF_LONGITUDE: lon,
         CONF_STATION_ID: station_id,
         CONF_FORECAST_MODELS: models,
+        CONF_ENABLE_INCA: bool(user_input.get(CONF_ENABLE_INCA, False)),
         CONF_ENABLE_WARNINGS: bool(user_input.get(CONF_ENABLE_WARNINGS, True)),
         CONF_ENABLE_AIR_QUALITY: bool(user_input.get(CONF_ENABLE_AIR_QUALITY, True)),
         CONF_ENABLE_OPEN_METEO: bool(user_input.get(CONF_ENABLE_OPEN_METEO, False)),
@@ -122,6 +124,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_LONGITUDE: lon,
                 CONF_STATION_ID: station_id,
                 CONF_FORECAST_MODELS: models,
+                CONF_ENABLE_INCA: bool(user_input.get(CONF_ENABLE_INCA, False)),
                 CONF_ENABLE_WARNINGS: enable_warnings,
                 CONF_ENABLE_AIR_QUALITY: enable_air_quality,
                 CONF_ENABLE_OPEN_METEO: enable_open_meteo,
@@ -168,6 +171,9 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_ENABLE_OPEN_METEO,
             self.config_entry.data.get(CONF_ENABLE_OPEN_METEO, False),
         )
+        current_enable_inca: bool = self.config_entry.options.get(
+            CONF_ENABLE_INCA, self.config_entry.data.get(CONF_ENABLE_INCA, False)
+        )
         current_om_forecast_days: int = int(self.config_entry.options.get(
             CONF_OPEN_METEO_FORECAST_DAYS,
             self.config_entry.data.get(CONF_OPEN_METEO_FORECAST_DAYS, OPEN_METEO_FORECAST_DAYS_DEFAULT),
@@ -177,6 +183,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
             current_name, current_lat, current_lon, current_station,
             current_models, current_enable_warnings, current_enable_air_quality,
             current_enable_open_meteo, current_om_forecast_days,
+            enable_inca=current_enable_inca,
         )
         return self.async_show_form(step_id="init", data_schema=schema)
 
@@ -191,6 +198,8 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
         enable_air_quality: bool = True,
         enable_open_meteo: bool = False,
         open_meteo_forecast_days: int = OPEN_METEO_FORECAST_DAYS_DEFAULT,
+        *,
+        enable_inca: bool = False,
     ) -> vol.Schema:
         station_field: Any
         if self._stations:
@@ -214,6 +223,7 @@ class GeoSphereOptionsFlowHandler(config_entries.OptionsFlow):
                 NumberSelectorConfig(min=-180, max=180, step=0.001, mode=NumberSelectorMode.BOX)
             ),
             vol.Optional(CONF_STATION_ID, default=station): station_field,
+            vol.Optional(CONF_ENABLE_INCA, default=enable_inca): BooleanSelector(),
             vol.Optional(CONF_FORECAST_MODELS, default=models): SelectSelector(
                 SelectSelectorConfig(
                     options=[
@@ -298,8 +308,11 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_unique = f"{round(data[CONF_LATITUDE], 5)}_{round(data[CONF_LONGITUDE], 5)}"
             await self.async_set_unique_id(new_unique)
             self._abort_if_unique_id_mismatch(reason="reconfigure_unique_id_mismatch")
+            # Vorhandene Options-Werte würden die neuen Data-Werte übersteuern.
+            options = dict(entry.options)
+            options.update({key: data[key] for key in options.keys() & data.keys()})
             return self.async_update_reload_and_abort(
-                entry, data=data, title=data[CONF_NAME]
+                entry, data=data, options=options, title=data[CONF_NAME]
             )
 
         return self.async_show_form(
@@ -331,6 +344,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _current(CONF_ENABLE_AIR_QUALITY, True),
             _current(CONF_ENABLE_OPEN_METEO, False),
             int(_current(CONF_OPEN_METEO_FORECAST_DAYS, OPEN_METEO_FORECAST_DAYS_DEFAULT)),
+            enable_inca=_current(CONF_ENABLE_INCA, False),
         )
 
     def _build_schema(self) -> vol.Schema:
@@ -355,6 +369,8 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         enable_air_quality: bool,
         enable_open_meteo: bool,
         open_meteo_forecast_days: int,
+        *,
+        enable_inca: bool = False,
     ) -> vol.Schema:
         """Gemeinsame Schema-Konstruktion für user- und reconfigure-Step."""
         station_field: Any
@@ -379,6 +395,7 @@ class GeoSphereAustriaPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 NumberSelectorConfig(min=-180, max=180, step=0.001, mode=NumberSelectorMode.BOX)
             ),
             vol.Optional(CONF_STATION_ID, default=station): station_field,
+            vol.Optional(CONF_ENABLE_INCA, default=enable_inca): BooleanSelector(),
             vol.Optional(CONF_FORECAST_MODELS, default=models): SelectSelector(
                 SelectSelectorConfig(
                     options=[

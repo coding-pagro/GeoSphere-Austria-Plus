@@ -32,6 +32,7 @@
           "lat": "Breitengrad",
           "lon": "Längengrad",
           "station_id": "TAWES-Messstation (optional)",
+          "enable_inca": "INCA-Analyse für aktuelles Wetter ohne TAWES-Station verwenden",
           "forecast_models": "Vorhersagemodelle (0–3 wählen)",
           "enable_warnings": "Unwetterwarnungen aktivieren",
           "enable_air_quality": "Luftqualitätsindex aktivieren",
@@ -54,6 +55,7 @@
           "lat": "Breitengrad",
           "lon": "Längengrad",
           "station_id": "TAWES-Messstation (optional)",
+          "enable_inca": "INCA-Analyse für aktuelles Wetter ohne TAWES-Station verwenden",
           "forecast_models": "Vorhersagemodelle (0–3 wählen)",
           "enable_warnings": "Unwetterwarnungen aktivieren",
           "enable_air_quality": "Luftqualitätsindex aktivieren",
@@ -72,6 +74,7 @@
           "lat": "Breitengrad",
           "lon": "Längengrad",
           "station_id": "TAWES-Messstation (optional)",
+          "enable_inca": "INCA-Analyse für aktuelles Wetter ohne TAWES-Station verwenden",
           "forecast_models": "Vorhersagemodelle (0–3 wählen)",
           "enable_warnings": "Unwetterwarnungen aktivieren",
           "enable_air_quality": "Luftqualitätsindex aktivieren",
@@ -102,6 +105,9 @@
   "exceptions": {
     "tawes_api_error": {
       "message": "GeoSphere-TAWES-Stations-API-Fehler: {error}"
+    },
+    "inca_api_error": {
+      "message": "GeoSphere-INCA-API-Fehler: {error}"
     },
     "forecast_api_error": {
       "message": "GeoSphere-Vorhersage-API-Fehler für Modell {model}: {error}"
