@@ -17,7 +17,9 @@ keine Rasterlücken, fehlenden Werte oder Abruffehler.
 ## Temperatur
 
 INCA lag in den 48 vergleichbaren Fällen im Mittel näher an TAWES. Für die übrigen
-52 Fälle fehlte eine zeitlich passende Temperaturreferenz. Alle Abrufe erfassten
+52 Fälle fehlte eine zeitlich passende Temperaturreferenz. Die vier Abrufe lagen nur
+sieben Minuten auseinander, und die TAWES-Messung nach dem Abrufzeitpunkt war noch
+nicht veröffentlicht. Im laufenden Betrieb ergänzen spätere Läufe diese Messungen. Alle Abrufe erfassten
 dieselbe INCA-Analyse. Der NWP-Fallback bleibt vorerst die Quelle für aktuelle
 Temperaturwerte ohne Stationsmessung. Ein breiterer Vergleich über verschiedene
 Wetterlagen und Analysealter kann zeigen, ob sich der beobachtete Vorteil wiederholt.
@@ -25,9 +27,14 @@ Wetterlagen und Analysealter kann zeigen, ob sich der beobachtete Vorteil wieder
 ## Niederschlag
 
 Der NWP-Zeitschritt endete in allen 100 Fällen um 13:00 Uhr MEZ. Die jüngste verfügbare
-INCA-Stundensumme endete um 12:00 Uhr MEZ. Mengenfehler, Treffer, übersehene Ereignisse
-und Fehlalarme sind für diese Stichprobe daher nicht berechenbar. Der NWP-Fallback
-bleibt die Quelle für aktuelle Niederschlagswerte ohne Stationsmessung.
+INCA-Stundensumme endete um 12:00 Uhr MEZ. Das ist kein Zufall der Stichprobe. Der
+angezeigte Fallback gilt immer für die laufende Stunde, die INCA-Analyse ist beim Abruf
+dagegen über eine Stunde alt. Gleiche Intervalle der beiden angezeigten Werte kommen
+daher nie vor. Der Logger speichert inzwischen zusätzlich den NWP-Wert für das
+INCA-Intervall aus demselben Abruf. Die Pilotläufe enthalten diesen Wert noch nicht.
+Mengenfehler, Treffer, übersehene Ereignisse und Fehlalarme sind für diese Stichprobe
+daher nicht berechenbar. Der NWP-Fallback bleibt vorerst die Quelle für aktuelle
+Niederschlagswerte ohne Stationsmessung.
 
 ## Referenz und Fortsetzung
 

@@ -274,6 +274,7 @@ def compare_current(runs, field, obs):
         sampled = parse_t(comparison["sampled_at"])
         for station in run["stations"]:
             sid = station["id"]
+            # Verfügbarkeit bezieht sich auf den Wert, den Plus anzeigen würde.
             forecast = comparison["forecast"][sid][field]
             inca = comparison["inca"][sid][field]
             availability["forecast"][forecast["status"]] += 1
@@ -281,6 +282,13 @@ def compare_current(runs, field, obs):
             if inca["status"] == "ok":
                 age = (sampled - parse_t(inca["valid_at"])).total_seconds() / 60
                 ages.append(age)
+            if field == "precipitation":
+                # Der angezeigte Fallback gilt für die laufende Stunde, INCA für eine
+                # frühere. Die Menge vergleicht daher den NWP-Wert des INCA-Intervalls.
+                forecast = comparison["forecast"][sid].get("precipitation_inca_interval")
+                if forecast is None:  # Aufzeichnung ohne diesen Wert
+                    excluded["different_interval"] += 1
+                    continue
             if forecast["status"] != "ok" or inca["status"] != "ok":
                 excluded["missing_candidate"] += 1
                 continue
@@ -350,6 +358,10 @@ def report_current_comparison(runs):
               f"{excluded['missing_obs']} ohne passende TAWES-Messung"
               + (f", {excluded['different_interval']} mit verschiedenen Intervallen."
                  if field == "precipitation" else "."))
+        if field == "precipitation":
+            print("\nDie Verfügbarkeit bezieht sich auf den angezeigten NWP-Fallback der laufenden Stunde. "
+                  "Für die Fehler vergleicht die Auswertung den NWP-Wert für dasselbe Stundenintervall "
+                  "wie die INCA-Analyse aus demselben Abruf.")
         if not rows:
             print("\nForecast-Fallback beibehalten. Für dieses Feld fehlen vergleichbare Fälle.")
             continue

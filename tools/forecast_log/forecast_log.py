@@ -93,15 +93,25 @@ def fetch_points(
     }
 
 
-def fetch_forecast(model: str, params: tuple[str, ...], stations: list[dict], *, tries: int = 4) -> dict:
-    return {"model": model, **fetch_points(f"forecast/{model}", params, stations, tries=tries)}
+def fetch_forecast(
+    model: str, params: tuple[str, ...], stations: list[dict], *, tries: int = 4, **filters: str,
+) -> dict:
+    return {"model": model, **fetch_points(f"forecast/{model}", params, stations, tries=tries, **filters)}
 
 
-def trim_forecast(result: dict, keep: int) -> dict:
+def trim_forecast(result: dict, keep: int, since: datetime | None = None) -> dict:
+    """Ab der Stunde ``since`` die nächsten ``keep`` Zeitschritte behalten."""
+    first = 0
+    if since is not None:
+        first = next(
+            (i for i, t in enumerate(result["times"]) if datetime.fromisoformat(t) >= since),
+            len(result["times"]),
+        )
+    window = slice(first, first + keep)
     return {
-        **result, "times": result["times"][:keep],
+        **result, "times": result["times"][window],
         "values": {
-            sid: {p: series[:keep] for p, series in values.items()}
+            sid: {p: series[window] for p, series in values.items()}
             for sid, values in result["values"].items()
         },
     }
@@ -173,6 +183,42 @@ def candidates(source: str, sid: str, fetched: datetime, data: dict | None, stat
     return result
 
 
+def forecast_for_interval(sid: str, data: dict | None, inca: dict) -> dict:
+    """NWP-Niederschlag für das Stundenintervall des INCA-Kandidaten.
+
+    Der angezeigte Fallback gilt für die laufende Stunde, die jüngste INCA-Analyse
+    ist dagegen über eine Stunde alt. Für den Mengenvergleich braucht es deshalb
+    den NWP-Wert desselben Intervalls aus demselben Abruf.
+    """
+    if data is None:
+        return {"status": "fetch_error"}
+    if sid in data.get("grid_gaps", []):
+        return {"status": "grid_gap"}
+    end = inca.get("interval_end")
+    if end is None:
+        return {"status": "missing"}
+    result = {"status": "missing", "interval_start": inca["interval_start"], "interval_end": end}
+    target = datetime.fromisoformat(end)
+    for index, raw_time in enumerate(data["times"]):
+        try:
+            if datetime.fromisoformat(raw_time) == target:
+                break
+        except (TypeError, ValueError):
+            continue
+    else:
+        return result
+    series = data["values"].get(sid, {})
+    amounts = []
+    for param in ("rain", "sf"):
+        points = series.get(param, [])
+        raw = points[index] if index < len(points) else None
+        if not finite(raw):
+            return result
+        amounts.append(raw)
+    result.update(status="ok", value=sum(amounts))
+    return result
+
+
 def fetch_inca(stations: list[dict], started: datetime, errors: list[str]) -> dict:
     """Eine Mehrpunktabfrage; bei Rastergrenzen fehlerhafte Punkte isolieren."""
     resource, params = INCA
@@ -230,36 +276,48 @@ def collect(data_dir: Path, stations_file: Path) -> int:
     # Beide Requests gehören zum selben Abruf. Ein späterer Retry könnte
     # bereits einen anderen Forecast-Lauf oder eine neue Analyse liefern.
     inca_errors: list[str] = []
+    # Ohne "start" beginnt die NWP-Antwort mit der laufenden Stunde. Das INCA-Intervall
+    # liegt aber bis zu zwei Stunden zurück, daher die Zeitreihe früher beginnen lassen.
+    # Der Fallback-Kandidat (erster Schritt ab "jetzt - 1 h") bleibt dabei derselbe.
+    hour = now.replace(minute=0, second=0, microsecond=0)
+    nwp_start = {"start": (hour - INCA_MAX_AGE).isoformat(timespec="minutes")}
     with ThreadPoolExecutor(max_workers=2) as pool:
         inca_task = pool.submit(fetch_inca, stations, now, inca_errors)
         try:
-            nwp = fetch_forecast(*NWP, stations, tries=1)
+            nwp = fetch_forecast(*NWP, stations, tries=1, **nwp_start)
         except Exception as err:  # Teilausfälle protokollieren
             nwp = None
             run["errors"].append(f"nwp: {err!r}")
         inca = inca_task.result()
     sampled = datetime.now(timezone.utc)
     run["errors"].extend(inca_errors)
+    inca_candidates = {
+        sid: candidates(INCA[0], sid, sampled, data, status)
+        for sid, (data, status) in inca.items()
+    }
+    forecast_candidates = {}
+    for sid, inca_candidate in inca_candidates.items():
+        forecast_candidates[sid] = candidates(
+            NWP[0], sid, sampled, nwp, "fetch_error" if nwp is None else "missing",
+        )
+        forecast_candidates[sid]["precipitation_inca_interval"] = forecast_for_interval(
+            sid, nwp, inca_candidate["precipitation"],
+        )
     run["comparison"] = {
         "sampled_at": sampled.isoformat(timespec="milliseconds"),
-        "forecast": {
-            sid: candidates(NWP[0], sid, sampled, nwp, "fetch_error" if nwp is None else "missing")
-            for sid in inca
-        },
-        "inca": {
-            sid: candidates(INCA[0], sid, sampled, data, status)
-            for sid, (data, status) in inca.items()
-        },
+        "forecast": forecast_candidates,
+        "inca": inca_candidates,
     }
     if nwp is None:
         # Die Vorhersage-Zeitreihe darf nachgeladen werden. Der Kandidat für
         # den INCA-Vergleich bleibt der bereits protokollierte Abruffehler.
         try:
-            nwp = fetch_forecast(*NWP, stations)
+            nwp = fetch_forecast(*NWP, stations, **nwp_start)
         except Exception as err:
             run["errors"].append(f"nwp (Vorhersagearchiv): {err!r}")
     if nwp:
-        run["nwp"] = trim_forecast(nwp, NWP_STEPS)
+        # Vorhersageauswertung wie bisher: laufende Stunde + 6 h.
+        run["nwp"] = trim_forecast(nwp, NWP_STEPS, since=hour)
     try:
         run["nowcast"] = fetch_forecast(*NOWCAST, stations)
     except Exception as err:

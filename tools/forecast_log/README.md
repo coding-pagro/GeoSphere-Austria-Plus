@@ -15,7 +15,7 @@ Pro Lauf **eine** Datei `data/JJJJ/MM/TT/run_HHMM.json.gz` mit
 | Inhalt | Quelle | Umfang |
 |---|---|---|
 | Nowcast | `nowcast-v1-15min-1km`: `t2m` (Temperatur), `rr` (Niederschlag) | alle Schritte, ca. 3 h voraus |
-| NWP | `nwp-v2-1h-1km`: `2t`, `tp`, `rain`, `sf` | aktuelle Stunde + 6 h |
+| NWP | `nwp-v2-1h-1km`: `2t`, `tp`, `rain`, `sf` | aktuelle Stunde + 6 h; für den INCA-Vergleich ab 2 h vor der aktuellen Stunde |
 | INCA | `inca-v2-1h-1km`: `2t`, `tp` | jüngster zurückgelieferter Zeitschritt bis maximal 2 h vor Abruf |
 | Messungen | `tawes-v1-10min`: `TL`, `RR` | letzte ca. 2 h |
 
@@ -45,7 +45,12 @@ Kandidaten. Aufzeichnungen ohne gleichzeitigen INCA-Abruf fließen nur in die Vo
   Mengenvergleich zählt eine vollständig beobachtete trockene Stunde als 0 mm. Es zählen
   nur Fälle, in denen das Stundenintervall beider Kandidaten identisch ist und alle sechs
   TAWES-Summen vorliegen. Treffer, übersehene Ereignisse und Fehlalarme beziehen sich auf
-  mindestens 0,1 mm pro Stunde.
+  mindestens 0,1 mm pro Stunde. Der angezeigte Fallback gilt für die laufende Stunde, die
+  jüngste INCA-Analyse ist beim Abruf aber über eine Stunde alt. Ihre Intervalle stimmen
+  daher nie überein. Der Logger fragt die NWP-Zeitreihe deshalb ab zwei Stunden vor der
+  laufenden Stunde ab und speichert zusätzlich den NWP-Wert für das INCA-Intervall
+  (`precipitation_inca_interval`). Die Fehler beim Niederschlag beruhen auf diesem Wert,
+  die Verfügbarkeit auf dem angezeigten Fallback.
 - **Verfügbarkeit** und **Analysealter** werden für jedes Feld berichtet. Ein fehlender
   Parameterwert, eine von der API gemeldete Rasterlücke und ein Abruffehler werden
   getrennt gezählt. TAWES-Messungen werden anhand von Stations-ID und Koordinaten zugeordnet.

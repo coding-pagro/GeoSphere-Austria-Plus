@@ -122,22 +122,27 @@ def test_collect_records_same_points_and_preserves_legacy_series(monkeypatch, tm
         assert forecast["retrieved_at"] == inca["retrieved_at"]
         assert forecast["precipitation"]["value"] == 2
     assert inca["precipitation"]["value"] == 1
+    if not nwp_failed:
+        assert forecast["precipitation_inca_interval"]["value"] == 2
+    nwp_query = calls[f"/v1/timeseries/forecast/{logger.NWP[0]}"][0]
+    assert nwp_query["start"] == [(HOUR_END - timedelta(hours=2)).isoformat(timespec="minutes")]
     assert calls[f"/v1/timeseries/forecast/{logger.NWP[0]}"][0]["lat_lon"] == ["48.2,15.6"]
     assert calls[f"/v1/timeseries/historical/{logger.INCA[0]}"][0]["lat_lon"] == ["48.2,15.6"]
 
 
 def comparison_run():
+    nwp = model_data([HOUR_END], **{"2t": [5], "rain": [0.2], "sf": [0]})
+    inca = logger.candidates(logger.INCA[0], "123", FETCHED, model_data(
+        [HOUR_END], **{"2t": [3], "tp": [0]},
+    ))
+    forecast = logger.candidates(logger.NWP[0], "123", FETCHED, nwp)
+    forecast["precipitation_inca_interval"] = logger.forecast_for_interval(
+        "123", nwp, inca["precipitation"],
+    )
     return {
         "stations": [STATION],
-        "comparison": {
-            "sampled_at": FETCHED.isoformat(),
-            "forecast": {"123": logger.candidates(logger.NWP[0], "123", FETCHED, model_data(
-                [HOUR_END], **{"2t": [5], "rain": [0.2], "sf": [0]},
-            ))},
-            "inca": {"123": logger.candidates(logger.INCA[0], "123", FETCHED, model_data(
-                [HOUR_END], **{"2t": [3], "tp": [0]},
-            ))},
-        },
+        "comparison": {"sampled_at": FETCHED.isoformat(), "forecast": {"123": forecast},
+                       "inca": {"123": inca}},
     }
 
 
@@ -178,12 +183,79 @@ def test_precipitation_needs_complete_identical_interval():
     assert not groups
     assert excluded["missing_obs"] == 1
 
-    candidate = run["comparison"]["forecast"]["123"]["precipitation"]
+    candidate = run["comparison"]["forecast"]["123"]["precipitation_inca_interval"]
     candidate["interval_start"] = HOUR_END.isoformat()
     candidate["interval_end"] = (HOUR_END + timedelta(hours=1)).isoformat()
     _, excluded, _, groups = analyze.compare_current([run], "precipitation", obs)
     assert not groups
     assert excluded["different_interval"] == 1
+
+
+def test_precipitation_uses_forecast_for_inca_interval_not_displayed_hour():
+    """Der angezeigte Fallback gilt für die laufende Stunde, INCA für eine frühere."""
+    inca_end = HOUR_END - timedelta(hours=1)
+    nwp = model_data([inca_end, HOUR_END], **{"2t": [4, 5], "rain": [0.4, 3], "sf": [0.1, 0]})
+    inca = logger.candidates(logger.INCA[0], "123", FETCHED, model_data(
+        [inca_end], **{"2t": [3], "tp": [0.3]},
+    ))
+    forecast = logger.candidates(logger.NWP[0], "123", FETCHED, nwp)
+    assert forecast["precipitation"]["interval_end"] == HOUR_END.isoformat()
+    forecast["precipitation_inca_interval"] = logger.forecast_for_interval(
+        "123", nwp, inca["precipitation"],
+    )
+    assert forecast["precipitation_inca_interval"] == {
+        "status": "ok", "value": 0.5,
+        "interval_start": (inca_end - timedelta(hours=1)).isoformat(),
+        "interval_end": inca_end.isoformat(),
+    }
+    run = {"stations": [STATION], "comparison": {
+        "sampled_at": FETCHED.isoformat(), "forecast": {"123": forecast}, "inca": {"123": inca},
+    }}
+    amounts = [0.1] * 6 + [0] * 7
+    times = [inca_end + timedelta(minutes=10 * k) for k in range(-5, 8)]
+    obs = analyze.comparison_observations([{"obs": {
+        "times": [t.isoformat() for t in times],
+        "values": {"123": {"TL": [1] * len(times), "RR": amounts}},
+        "locations": {"123": [48.2, 15.6]},
+    }}])
+    counts, excluded, _, groups = analyze.compare_current([run], "precipitation", obs)
+    assert counts["forecast"]["ok"] == 1
+    assert not excluded
+    assert groups[60] == [pytest.approx((0.5, 0.3, 0.6))]
+
+
+def test_forecast_for_interval_reports_missing_values():
+    inca = {"interval_start": HOUR_END.isoformat(),
+            "interval_end": (HOUR_END + timedelta(hours=1)).isoformat()}
+    data = model_data([HOUR_END], **{"rain": [1], "sf": [0]})
+    assert logger.forecast_for_interval("123", data, inca)["status"] == "missing"
+    assert logger.forecast_for_interval("123", None, inca) == {"status": "fetch_error"}
+    assert logger.forecast_for_interval("123", data, {"status": "missing"}) == {"status": "missing"}
+    gap = {**data, "grid_gaps": ["123"]}
+    assert logger.forecast_for_interval("123", gap, inca) == {"status": "grid_gap"}
+    partial = model_data([HOUR_END], **{"rain": [1], "sf": [None]})
+    assert logger.forecast_for_interval(
+        "123", partial, {"interval_start": "x", "interval_end": HOUR_END.isoformat()},
+    )["status"] == "missing"
+
+
+def test_legacy_comparison_without_inca_interval_counts_as_different_interval():
+    run = comparison_run()
+    del run["comparison"]["forecast"]["123"]["precipitation_inca_interval"]
+    obs = analyze.comparison_observations([measurement_run()])
+    counts, excluded, _, groups = analyze.compare_current([run], "precipitation", obs)
+    assert counts["forecast"]["ok"] == 1
+    assert not groups
+    assert excluded["different_interval"] == 1
+
+
+def test_trim_forecast_starts_at_current_hour():
+    times = [HOUR_END + timedelta(hours=k) for k in range(-2, 3)]
+    data = {"times": [t.isoformat() for t in times], "values": {"123": {"tp": [0, 1, 2, 3, 4]}}}
+    trimmed = logger.trim_forecast(data, 2, since=HOUR_END)
+    assert trimmed["times"] == [t.isoformat() for t in times[2:4]]
+    assert trimmed["values"]["123"]["tp"] == [2, 3]
+    assert logger.trim_forecast(data, 2)["values"]["123"]["tp"] == [0, 1]
 
 
 def test_report_ignores_legacy_forecast_without_inca(capsys):
