@@ -6,7 +6,7 @@ Jeder Lauf schreibt eine Datei
 
 * der aktuellen Nowcast-Prognose (Temperatur ``t2m``, Niederschlag ``rr``) fuer alle Stationen,
 * der aktuellen NWP-Prognose (``2t``, ``tp``) fuer die naechsten 6 Stunden,
-* den aktuellen Vergleichswerten aus dem NWP-Fallback und INCA v2,
+* den aktuellen Vergleichswerten aus NWP-Fallback, Nowcast und INCA v2,
 * den TAWES-Messungen (``TL``, ``RR``) der letzten ~2 Stunden.
 
 Ausgewertet wird mit ``analyze.py``. Der Schalter ``--inca`` vergleicht aktuelle Werte.
@@ -40,6 +40,7 @@ NWP = ("nwp-v2-1h-1km", ("2t", "tp", "rain", "sf"))
 INCA = ("inca-v2-1h-1km", ("2t", "tp"))
 INCA_MAX_AGE = timedelta(hours=2)  # wie im Entwurf #69
 HOUR = timedelta(hours=1)
+NOWCAST_STEP = timedelta(minutes=15)
 NWP_STEPS = 7           # aktuelle Stunde + 6 Stunden
 OBS_PARAMS = "TL,RR"
 OBS_WINDOW_MIN = 130    # ueberlappt mit dem Vorlauf, damit ein verpasster Lauf keine Luecke hinterlaesst
@@ -133,6 +134,9 @@ def candidates(source: str, sid: str, fetched: datetime, data: dict | None, stat
         return result
 
     is_inca = source == INCA[0]
+    is_nowcast = source == NOWCAST[0]
+    if not is_inca:
+        result["reference_time"] = data.get("ref")
     times = []
     for index, raw_time in enumerate(data["times"]):
         try:
@@ -160,10 +164,15 @@ def candidates(source: str, sid: str, fetched: datetime, data: dict | None, stat
         raw = points[index] if index < len(points) else None
         return raw if finite(raw) else None
 
-    temperature = value("2t")
+    temperature = value("t2m" if is_nowcast else "2t")
+    interval = NOWCAST_STEP if is_nowcast else HOUR
     if is_inca:
         amount = value("tp")
         entity_amount = amount
+    elif is_nowcast:
+        # Plus zeigt die 15-Minuten-Summe rr des ersten Schritts, bei Trockenheit leer.
+        amount = value("rr")
+        entity_amount = amount or None
     else:
         rain, snow = value("rain"), value("sf")
         # Plus liefert None bei Trockenheit und behandelt einzelne fehlende
@@ -178,7 +187,7 @@ def candidates(source: str, sid: str, fetched: datetime, data: dict | None, stat
     result["precipitation"] = {
         "status": "ok" if amount is not None else "missing",
         "valid_at": valid_at.isoformat(), "value": amount, "entity_value": entity_amount,
-        "interval_start": (valid_at - HOUR).isoformat(), "interval_end": valid_at.isoformat(),
+        "interval_start": (valid_at - interval).isoformat(), "interval_end": valid_at.isoformat(),
     }
     return result
 
@@ -273,7 +282,7 @@ def collect(data_dir: Path, stations_file: Path) -> int:
         "stations": stations,
         "nowcast": None, "nwp": None, "obs": None, "errors": [],
     }
-    # Beide Requests gehören zum selben Abruf. Ein späterer Retry könnte
+    # Alle drei Requests gehören zum selben Abruf. Ein späterer Retry könnte
     # bereits einen anderen Forecast-Lauf oder eine neue Analyse liefern.
     inca_errors: list[str] = []
     # Ohne "start" beginnt die NWP-Antwort mit der laufenden Stunde. Das INCA-Intervall
@@ -281,13 +290,19 @@ def collect(data_dir: Path, stations_file: Path) -> int:
     # Der Fallback-Kandidat (erster Schritt ab "jetzt - 1 h") bleibt dabei derselbe.
     hour = now.replace(minute=0, second=0, microsecond=0)
     nwp_start = {"start": (hour - INCA_MAX_AGE).isoformat(timespec="minutes")}
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         inca_task = pool.submit(fetch_inca, stations, now, inca_errors)
+        nowcast_task = pool.submit(fetch_forecast, *NOWCAST, stations, tries=1)
         try:
             nwp = fetch_forecast(*NWP, stations, tries=1, **nwp_start)
         except Exception as err:  # Teilausfälle protokollieren
             nwp = None
             run["errors"].append(f"nwp: {err!r}")
+        try:
+            nowcast = nowcast_task.result()
+        except Exception as err:
+            nowcast = None
+            run["errors"].append(f"nowcast: {err!r}")
         inca = inca_task.result()
     sampled = datetime.now(timezone.utc)
     run["errors"].extend(inca_errors)
@@ -307,6 +322,12 @@ def collect(data_dir: Path, stations_file: Path) -> int:
         "sampled_at": sampled.isoformat(timespec="milliseconds"),
         "forecast": forecast_candidates,
         "inca": inca_candidates,
+        "nowcast": {
+            sid: candidates(
+                NOWCAST[0], sid, sampled, nowcast, "fetch_error" if nowcast is None else "missing",
+            )
+            for sid in inca_candidates
+        },
     }
     if nwp is None:
         # Die Vorhersage-Zeitreihe darf nachgeladen werden. Der Kandidat für
@@ -318,10 +339,12 @@ def collect(data_dir: Path, stations_file: Path) -> int:
     if nwp:
         # Vorhersageauswertung wie bisher: laufende Stunde + 6 h.
         run["nwp"] = trim_forecast(nwp, NWP_STEPS, since=hour)
-    try:
-        run["nowcast"] = fetch_forecast(*NOWCAST, stations)
-    except Exception as err:
-        run["errors"].append(f"nowcast: {err!r}")
+    if nowcast is None:
+        try:
+            nowcast = fetch_forecast(*NOWCAST, stations)
+        except Exception as err:
+            run["errors"].append(f"nowcast (Vorhersagearchiv): {err!r}")
+    run["nowcast"] = nowcast
     time.sleep(1)
     end = now.replace(minute=now.minute - now.minute % 10, second=0, microsecond=0)
     try:

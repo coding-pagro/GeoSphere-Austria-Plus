@@ -122,6 +122,9 @@ def test_collect_records_same_points_and_preserves_legacy_series(monkeypatch, tm
         assert forecast["retrieved_at"] == inca["retrieved_at"]
         assert forecast["precipitation"]["value"] == 2
     assert inca["precipitation"]["value"] == 1
+    nowcast = run["comparison"]["nowcast"]["123"]
+    assert nowcast["temperature"]["value"] == 1
+    assert calls[f"/v1/timeseries/forecast/{logger.NOWCAST[0]}"][1] == 1
     if not nwp_failed:
         assert forecast["precipitation_inca_interval"]["value"] == 2
     nwp_query = calls[f"/v1/timeseries/forecast/{logger.NWP[0]}"][0]
@@ -261,3 +264,64 @@ def test_trim_forecast_starts_at_current_hour():
 def test_report_ignores_legacy_forecast_without_inca(capsys):
     analyze.report_current_comparison([{"version": 1, "nwp": {}}])
     assert "Keine zeitgleich aufgezeichneten" in capsys.readouterr().out
+
+
+def test_nowcast_candidate_matches_plus_first_step_and_15_minute_sum():
+    step = HOUR_END + timedelta(minutes=15)
+    data = {**model_data([HOUR_END - timedelta(minutes=75), step],
+                         **{"t2m": [1, 4.5], "rr": [3, 0]}), "ref": HOUR_END.isoformat()}
+    result = logger.candidates(logger.NOWCAST[0], "123", FETCHED, data)
+    assert result["reference_time"] == HOUR_END.isoformat()
+    assert result["temperature"] == {"status": "ok", "valid_at": step.isoformat(), "value": 4.5}
+    precip = result["precipitation"]
+    assert (precip["value"], precip["entity_value"]) == (0, None)
+    assert precip["interval_start"] == HOUR_END.isoformat()
+    assert precip["interval_end"] == step.isoformat()
+
+
+def nowcast_comparison_run(sampled=FETCHED, nowcast_temperature=4):
+    run = comparison_run()
+    run["comparison"]["sampled_at"] = sampled.isoformat()
+    run["comparison"]["nowcast"] = {"123": logger.candidates(logger.NOWCAST[0], "123", sampled, {
+        **model_data([sampled + timedelta(minutes=10)], **{"t2m": [nowcast_temperature], "rr": [0]}),
+        "ref": (sampled - timedelta(minutes=20)).isoformat(),
+    })}
+    return run
+
+
+def test_nowcast_temperature_uses_common_cases_and_day_parts():
+    obs = analyze.comparison_observations([measurement_run()])
+    legacy = comparison_run()
+    availability, ages, rows = analyze.compare_nowcast_temperature(
+        [legacy, nowcast_comparison_run()], obs,
+    )
+    assert availability["ok"] == 1
+    assert ages == [20]
+    # 12:05 UTC = 13:05 MEZ
+    assert rows == [(5, 3, 4, 4, "Tag 10–16")]
+
+    missing = nowcast_comparison_run(nowcast_temperature=None)
+    availability, _, rows = analyze.compare_nowcast_temperature([missing], obs)
+    assert availability["missing"] == 1
+    assert not rows
+
+
+@pytest.mark.parametrize("utc, label", [
+    ("2026-11-11T05:00:00+00:00", "Morgen 6–10"),
+    ("2026-11-11T04:59:00+00:00", "Nacht 22–6"),
+    ("2026-11-11T21:30:00+00:00", "Nacht 22–6"),
+    ("2026-07-11T19:30:00+00:00", "Abend 16–22"),
+])
+def test_day_part_uses_vienna_local_time(utc, label):
+    assert analyze.day_part(datetime.fromisoformat(utc)) == label
+
+
+def test_report_shows_nowcast_section(capsys):
+    obs_run = measurement_run()
+    run = nowcast_comparison_run()
+    analyze.report_current_comparison([{**run, **obs_run}])
+    out = capsys.readouterr().out
+    assert "### Mit Nowcast" in out
+    assert "| Alle | 1 | 1.000 | 1.000 | 0.000 |" in out
+    assert "Nowcast am nächsten" in out
+    assert "Nowcast fehlt beim Niederschlag" in out

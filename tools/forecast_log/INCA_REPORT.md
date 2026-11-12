@@ -43,5 +43,8 @@ GeoSphere verwendet Stationsbeobachtungen als Eingabe für die Analyse. Für Sta
 zwischen Stationen fehlt damit eine unabhängige Validierung.
 [GeoSphere DataHub – INCA v2](https://data.hub.geosphere.at/dataset/inca-v2-1h-1km)
 
-Der [Forecast-Logger](README.md) plant weitere Abrufe in drei Phasen der Stunde.
+Der [Forecast-Logger](README.md) plant weitere Abrufe in drei Phasen der Stunde. Er
+erfasst inzwischen auch den ersten Nowcast-Zeitschritt als dritten Kandidaten. Nowcast
+ist beim Abruf etwa eine halbe Stunde alt, INCA dagegen bis zu knapp zwei Stunden. Die
+Pilotläufe enthalten den Nowcast-Kandidaten noch nicht.
 Die Auswertung lässt sich mit `analyze.py --data-dir <datenordner> --inca` wiederholen.

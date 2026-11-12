@@ -27,6 +27,16 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean, median
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+try:
+    LOCAL_TZ = ZoneInfo("Europe/Vienna")
+except ZoneInfoNotFoundError:  # Windows ohne tzdata
+    LOCAL_TZ = timezone(timedelta(hours=1))
+# Tageszeiten in Ortszeit: (Bezeichnung, erste Stunde, Stunde nach dem Ende)
+DAY_PARTS = (
+    ("Nacht 22–6", 22, 6), ("Morgen 6–10", 6, 10), ("Tag 10–16", 10, 16), ("Abend 16–22", 16, 22),
+)
 
 # Modell -> (Temperatur-Parameter, Niederschlags-Parameter)
 MODELS = {"nowcast": ("t2m", "rr"), "nwp": ("2t", "tp")}
@@ -306,6 +316,82 @@ def compare_current(runs, field, obs):
     return availability, excluded, ages, groups
 
 
+def day_part(t):
+    hour = t.astimezone(LOCAL_TZ).hour
+    for label, first, end in DAY_PARTS:
+        if (first <= hour < end) if first < end else (hour >= first or hour < end):
+            return label
+    raise ValueError(hour)
+
+
+def compare_nowcast_temperature(runs, obs):
+    """Temperatur aus NWP-Fallback, INCA und Nowcast auf gemeinsamen Fällen.
+
+    Zeilen: (NWP, INCA, Nowcast, Messung, Tageszeit). Aufzeichnungen ohne
+    Nowcast-Kandidaten fließen nicht ein.
+    """
+    availability = Counter()
+    ages = []
+    rows = []
+    for run in runs:
+        comparison = run["comparison"]
+        if "nowcast" not in comparison:
+            continue
+        sampled = parse_t(comparison["sampled_at"])
+        for station in run["stations"]:
+            sid = station["id"]
+            nowcast = comparison["nowcast"][sid]
+            candidate = nowcast["temperature"]
+            availability[candidate["status"]] += 1
+            if nowcast.get("reference_time"):
+                ages.append((sampled - parse_t(nowcast["reference_time"])).total_seconds() / 60)
+            values = [comparison[source][sid]["temperature"] for source in ("forecast", "inca")]
+            values.append(candidate)
+            if any(v["status"] != "ok" for v in values):
+                continue
+            truth = obs_at(obs.get(point(station), {}).get("TL", {}), sampled)
+            if truth is not None:
+                rows.append((*(v["value"] for v in values), truth, day_part(sampled)))
+    return availability, ages, rows
+
+
+def report_nowcast_temperature(runs, obs):
+    availability, ages, rows = compare_nowcast_temperature(runs, obs)
+    print("\n### Mit Nowcast\n")
+    total = sum(availability.values())
+    if not total:
+        print("Keine Aufzeichnungen mit Nowcast-Kandidaten.")
+        return
+    print(f"Nowcast nutzbar in {availability['ok']}/{total} Fällen "
+          f"({availability['ok'] / total:.1%}); fehlender Wert {availability['missing']}, "
+          f"Rasterlücke {availability['grid_gap']}, Abruffehler {availability['fetch_error']}.")
+    if ages:
+        print(f"Alter des Nowcast-Laufs in Minuten (Minimum / Median / Maximum) "
+              f"{min(ages):.1f} / {median(ages):.1f} / {max(ages):.1f}.")
+    if not rows:
+        print("\nKeine gemeinsamen Fälle aller drei Quellen mit TAWES-Messung.")
+        return
+    print("\nGemeinsame Fälle, in denen alle drei Quellen und eine Messung vorliegen.\n")
+    print("| Tageszeit (Ortszeit) | Fälle | MAE NWP (°C) | MAE INCA (°C) | MAE Nowcast (°C) |")
+    print("|---|---:|---:|---:|---:|")
+    parts = [(label, [r for r in rows if r[4] == label]) for label, _, _ in DAY_PARTS]
+    for label, group in [("Alle", rows), *((label, g) for label, g in parts if g)]:
+        nwp, inca, nowcast = (mean(abs(r[i] - r[3]) for r in group) for i in range(3))
+        print(f"| {label} | {len(group)} | {nwp:.3f} | {inca:.3f} | {nowcast:.3f} |")
+    errors = {
+        name: mean(abs(r[i] - r[3]) for r in rows)
+        for i, name in enumerate(("NWP-Fallback", "INCA", "Nowcast"))
+    }
+    best = min(errors, key=errors.get)
+    print(f"\nIm gemeinsamen Satz liegt {best} am nächsten an der Messung.")
+    if errors["Nowcast"] <= errors["INCA"]:
+        print("Nowcast ist dabei mindestens so genau wie INCA, ohne die Verzögerung der "
+              "stündlichen Analyse. Für aktuelle Werte spricht das gegen INCA.")
+    if len({row[4] for row in rows}) < len(DAY_PARTS):
+        print("Nicht alle Tageszeiten sind erfasst. Morgen und Abend sind wegen des "
+              "Tagesgangs für die Verzögerung von INCA entscheidend.")
+
+
 def comparison_mae(rows, index):
     return mean(abs(row[index] - row[2]) for row in rows)
 
@@ -317,10 +403,18 @@ def precipitation_events(rows, index):
     return events[True, True], events[False, True], events[True, False]
 
 
+def report_nowcast(field, runs, obs):
+    if field == "temperature":
+        report_nowcast_temperature(runs, obs)
+    else:
+        print("\nNowcast fehlt beim Niederschlag. Er liefert 15-Minuten-Summen erst ab seinem "
+              "Referenzzeitpunkt und deckt das zurückliegende INCA-Stundenintervall nicht ab.")
+
+
 def report_current_comparison(runs):
     obs = comparison_observations(runs)
     runs = [run for run in runs if run.get("comparison")]
-    print("# INCA v2 und NWP-Fallback im Vergleich")
+    print("# INCA v2, NWP-Fallback und Nowcast im Vergleich")
     if not runs:
         print("\nKeine zeitgleich aufgezeichneten INCA- und Fallback-Abrufe vorhanden.")
         return
@@ -364,6 +458,7 @@ def report_current_comparison(runs):
                   "wie die INCA-Analyse aus demselben Abruf.")
         if not rows:
             print("\nForecast-Fallback beibehalten. Für dieses Feld fehlen vergleichbare Fälle.")
+            report_nowcast(field, runs, obs)
             continue
 
         print(f"\n| INCA-Alter (min) | Fälle | MAE NWP ({unit}) | MAE INCA ({unit}) |")
@@ -394,6 +489,7 @@ def report_current_comparison(runs):
         else:
             print("\nFür die erfassten Standorte und Zeiten stützt die Stichprobe einen Vorrang "
                   "für INCA. Der MAE ist kleiner und die Verfügbarkeit mindestens gleich hoch.")
+        report_nowcast(field, runs, obs)
 
     print("\n## Unabhängigkeit der Referenz\n")
     print("TAWES-Beobachtungen können in INCA einfließen. Die Nachweise sind je Standort aufgeführt.\n")

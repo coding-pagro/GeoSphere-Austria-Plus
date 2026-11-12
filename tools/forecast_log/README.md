@@ -51,6 +51,12 @@ Kandidaten. Aufzeichnungen ohne gleichzeitigen INCA-Abruf fließen nur in die Vo
   laufenden Stunde ab und speichert zusätzlich den NWP-Wert für das INCA-Intervall
   (`precipitation_inca_interval`). Die Fehler beim Niederschlag beruhen auf diesem Wert,
   die Verfügbarkeit auf dem angezeigten Fallback.
+- **Nowcast** wird bei jedem Abruf parallel als dritter Kandidat erfasst. Wie die
+  Nowcast-Entität von Plus gilt der erste Zeitschritt, der höchstens eine Stunde
+  zurückliegt. Die Temperatur vergleicht der Bericht auf den gemeinsamen Fällen aller drei
+  Quellen und nach Tageszeit in Ortszeit, weil sich die Verzögerung von INCA vor allem
+  morgens und abends auswirkt. Beim Niederschlag fehlt Nowcast. Er liefert 15-Minuten-Summen
+  erst ab seinem Referenzzeitpunkt und deckt das zurückliegende INCA-Intervall nicht ab.
 - **Verfügbarkeit** und **Analysealter** werden für jedes Feld berichtet. Ein fehlender
   Parameterwert, eine von der API gemeldete Rasterlücke und ein Abruffehler werden
   getrennt gezählt. TAWES-Messungen werden anhand von Stations-ID und Koordinaten zugeordnet.
