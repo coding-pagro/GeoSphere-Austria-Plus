@@ -1,6 +1,7 @@
 """Tests für Coordinator-Fallback und Fibonacci-Retry bei API-Fehlern."""
 from __future__ import annotations
 
+import asyncio
 import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -15,6 +16,7 @@ from custom_components.geosphere_austria_plus.coordinator import (
     GeoSphereForecastCoordinator,
     GeoSphereWarningsCoordinator,
     GeoSphereAirQualityCoordinator,
+    GeoSphereOpenMeteoDailyCoordinator,
     _RETRY_INTERVALS,
 )
 from custom_components.geosphere_austria_plus.api import GeoSphereApiError
@@ -493,3 +495,87 @@ class TestCoordinatorConstructors:
         assert coord.lat == 48.2
         assert coord.lon == 16.37
         assert coord._last_good_data is None
+
+
+# ---------------------------------------------------------------------------
+# async_refresh must reach DataUpdateCoordinator (regression)
+# ---------------------------------------------------------------------------
+
+_ALL_COORDINATORS = (
+    GeoSphereCurrentCoordinator,
+    GeoSphereForecastCoordinator,
+    GeoSphereWarningsCoordinator,
+    GeoSphereAirQualityCoordinator,
+    GeoSphereOpenMeteoDailyCoordinator,
+)
+
+
+class TestAsyncRefreshReachesBase:
+    """_RetryMixin steht in der MRO vor DataUpdateCoordinator. Eine dort zur
+    Laufzeit definierte async_refresh-Methode machte jeden Refresh zum No-op:
+    den ersten Abruf optionaler Quellen beim Start und jeden Fibonacci-Retry."""
+
+    @pytest.mark.parametrize("cls", _ALL_COORDINATORS, ids=lambda c: c.__name__)
+    def test_async_refresh_resolves_to_data_update_coordinator(self, cls):
+        assert cls.async_refresh is _BaseCoordinator.async_refresh
+
+    @pytest.mark.asyncio
+    async def test_async_refresh_fetches_open_meteo_data(self):
+        coord = _make_coordinator(
+            GeoSphereOpenMeteoDailyCoordinator, lat=48.2, lon=16.37, _session=MagicMock()
+        )
+        days =[{"datetime": "2026-11-20T00:00:00+00:00", "condition": "sunny"}]
+        with patch(
+            "custom_components.geosphere_austria_plus.coordinator.fetch_open_meteo_daily",
+            new=AsyncMock(return_value=days),
+        ):
+            await coord.async_refresh()
+
+        assert coord.data == days
+        assert coord.last_update_success is True
+
+    @pytest.mark.asyncio
+    async def test_retry_callback_runs_a_real_refresh(self):
+        coord = _make_coordinator(GeoSphereCurrentCoordinator, station_id="11035")
+        coord._last_good_data = {"TL": 18.5}
+        coord._api.get_current = AsyncMock(
+            side_effect=[GeoSphereApiError("timeout"), {"TL": 21.0}]
+        )
+        coord.hass.async_create_task = asyncio.ensure_future
+        captured_cb = {}
+
+        def _capture(delay, cb):
+            captured_cb["cb"] = cb
+            return MagicMock()
+
+        coord.hass.async_call_later.side_effect = _capture
+
+        # Erster Abruf scheitert → Cache + geplanter Retry
+        await coord.async_refresh()
+        assert coord.data == {"TL": 18.5}
+
+        captured_cb["cb"](None)
+        await coord._pending_retry_task
+
+        assert coord._api.get_current.await_count == 2
+        assert coord.data == {"TL": 21.0}
+        assert coord._retry_step == 0
+
+
+class TestCancelPendingRetryInsideRetryTask:
+    @pytest.mark.asyncio
+    async def test_retry_task_does_not_cancel_itself(self):
+        """Erfolg oder Fehler im Retry-Abruf rufen _cancel_pending_retry aus dem
+        Retry-Task heraus auf. Bräche der Task sich dabei selbst ab, endete er
+        als abgebrochen statt mit den frisch geholten Daten."""
+        coord = _make_coordinator(GeoSphereCurrentCoordinator, station_id="11035")
+
+        async def _retry_body():
+            coord._cancel_pending_retry()
+            return "done"
+
+        task = asyncio.ensure_future(_retry_body())
+        coord._pending_retry_task = task
+
+        assert await task == "done"
+        assert coord._pending_retry_task is None

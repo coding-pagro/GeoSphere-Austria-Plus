@@ -471,6 +471,39 @@ class TestFirstRefreshFailure:
 
         assert "nicht verfügbar" not in caplog.text
 
+    async def test_real_open_meteo_coordinator_fetches_during_setup(self):
+        """Ohne Klassen-Mock: Die Einrichtung muss den ersten Abruf wirklich ausführen.
+
+        Die übrigen Tests ersetzen die Coordinator-Klassen und hätten deshalb
+        nicht bemerkt, dass async_refresh zur Laufzeit ein No-op war.
+        """
+        entry = _make_entry(data={
+            **_BASE_DATA,
+            CONF_ENABLE_WARNINGS: False,
+            CONF_ENABLE_AIR_QUALITY: False,
+            CONF_ENABLE_OPEN_METEO: True,
+        })
+        hass = _make_hass()
+        days = [{"datetime": "2026-11-20T00:00:00+00:00", "condition": "sunny"}]
+
+        with (
+            patch(
+                f"{_PATCH_BASE}.GeoSphereForecastCoordinator",
+                return_value=_make_coordinator_mock(),
+            ),
+            patch(
+                f"{_PATCH_BASE}.coordinator.fetch_open_meteo_daily",
+                new=AsyncMock(return_value=days),
+            ) as fetch,
+            patch(f"{_PATCH_BASE}.er") as mock_er,
+        ):
+            mock_er.async_entries_for_config_entry.return_value = []
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+        fetch.assert_awaited_once()
+        assert hass.data[DOMAIN][entry.entry_id][DATA_OPEN_METEO_DAILY].data == days
+
     async def test_failed_forecast_refresh_still_aborts_setup(self):
         """Vorhersagen sind Kernfunktion: Home Assistant wiederholt die Einrichtung."""
         entry = _make_entry(data=_BASE_DATA)
