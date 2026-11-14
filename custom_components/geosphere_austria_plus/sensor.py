@@ -13,7 +13,6 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     DEGREE,
     PERCENTAGE,
     EntityCategory,
@@ -46,6 +45,24 @@ from .coordinator import (
     GeoSphereWarningsCoordinator,
     GeoSphereAirQualityCoordinator,
 )
+
+def _micrograms_per_cubic_meter() -> str:
+    """Einheit µg/m³ passend zur laufenden Home-Assistant-Version liefern.
+
+    UnitOfDensity gibt es ab Home Assistant 2026.7; die alte Konstante entfällt
+    mit 2027.8. Beide ergeben dieselbe Einheit.
+    """
+    try:
+        from homeassistant.const import UnitOfDensity
+    except ImportError:
+        from homeassistant.const import CONCENTRATION_MICROGRAMS_PER_CUBIC_METER
+
+        legacy_unit: str = CONCENTRATION_MICROGRAMS_PER_CUBIC_METER
+        return legacy_unit
+    return UnitOfDensity.MICROGRAMS_PER_CUBIC_METER
+
+
+_MICROGRAMS_PER_CUBIC_METER = _micrograms_per_cubic_meter()
 
 
 # Alle Daten werden zentral pro Coordinator abgerufen — Entities pollen nicht
@@ -186,7 +203,7 @@ AIR_QUALITY_SENSORS: tuple[AirQualitySensorDescription, ...] = (
     AirQualitySensorDescription(
         key="no2",            translation_key="no2",
         param="no2surf",
-        native_unit_of_measurement=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        native_unit_of_measurement=_MICROGRAMS_PER_CUBIC_METER,
         device_class=SensorDeviceClass.NITROGEN_DIOXIDE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:molecule",
@@ -194,7 +211,7 @@ AIR_QUALITY_SENSORS: tuple[AirQualitySensorDescription, ...] = (
     AirQualitySensorDescription(
         key="o3",             translation_key="o3",
         param="o3surf",
-        native_unit_of_measurement=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        native_unit_of_measurement=_MICROGRAMS_PER_CUBIC_METER,
         device_class=SensorDeviceClass.OZONE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:sun-wireless",
@@ -202,7 +219,7 @@ AIR_QUALITY_SENSORS: tuple[AirQualitySensorDescription, ...] = (
     AirQualitySensorDescription(
         key="pm10",           translation_key="pm10",
         param="pm10surf",
-        native_unit_of_measurement=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        native_unit_of_measurement=_MICROGRAMS_PER_CUBIC_METER,
         device_class=SensorDeviceClass.PM10,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:air-filter",
@@ -210,7 +227,7 @@ AIR_QUALITY_SENSORS: tuple[AirQualitySensorDescription, ...] = (
     AirQualitySensorDescription(
         key="pm25",           translation_key="pm25",
         param="pm25surf",
-        native_unit_of_measurement=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        native_unit_of_measurement=_MICROGRAMS_PER_CUBIC_METER,
         device_class=SensorDeviceClass.PM25,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:air-filter",

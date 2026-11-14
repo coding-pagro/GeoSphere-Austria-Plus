@@ -1,12 +1,14 @@
 """Open-Meteo API client – daily forecast extension."""
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, timezone
 from typing import Any
 
 import aiohttp
 from aiohttp import ClientTimeout
 
+from .daily_window import in_daily_window
 from .const import (
     OPEN_METEO_API_BASE,
     OPEN_METEO_DAILY_PARAMS,
@@ -31,6 +33,7 @@ async def fetch_open_meteo_daily(
         "precipitation_unit": "mm",
         "wind_speed_unit": "ms",
         "daily": OPEN_METEO_DAILY_PARAMS,
+        "hourly": "cloud_cover",
     }
 
     async with session.get(
@@ -44,6 +47,7 @@ async def fetch_open_meteo_daily(
     today = datetime.now(timezone.utc).date()
     daily = data["daily"]
     times: list[str] = daily["time"]
+    daytime_cloud_cover = _daytime_cloud_cover_by_day(data.get("hourly"), lon)
     result: list[dict[str, Any]] = []
 
     for i, day_str in enumerate(times):
@@ -80,7 +84,8 @@ async def fetch_open_meteo_daily(
         _put(entry, "native_wind_gust_speed", _v("wind_gusts_10m_max"))
         _put(entry, "wind_bearing", _v("wind_direction_10m_dominant"))
         _put(entry, "humidity", _v("relative_humidity_2m_mean"))
-        _put(entry, "cloud_coverage", _v("cloud_cover_mean"))
+        cloud_cover = daytime_cloud_cover.get(day_str, _v("cloud_cover_mean"))
+        _put(entry, "cloud_coverage", round(cloud_cover) if cloud_cover is not None else None)
         _put(entry, "native_pressure", _v("pressure_msl_mean"))
         _put(entry, "native_dew_point", _v("dew_point_2m_mean"))
         _put(entry, "uv_index", _v("uv_index_max"))
@@ -96,6 +101,26 @@ async def fetch_open_meteo_daily(
         result.append(entry)
 
     return result
+
+
+def _daytime_cloud_cover_by_day(
+    hourly: dict[str, Any] | None, lon: float
+) -> dict[str, float]:
+    """Mittlere Bewölkung (%) je UTC-Tag über das Tagesfenster, wie bei GeoSphere.
+
+    Open-Meteos cloud_cover_mean mittelt über 24 h; mit klaren Nächten läge er
+    sonst deutlich unter dem Wert der GeoSphere-Tage davor.
+    """
+    if not hourly:
+        return {}
+    by_day: dict[str, list[float]] = defaultdict(list)
+    for time_str, value in zip(hourly.get("time", []), hourly.get("cloud_cover", [])):
+        if value is None:
+            continue
+        dt = datetime.fromisoformat(time_str)
+        if in_daily_window(dt, lon):
+            by_day[dt.date().isoformat()].append(float(value))
+    return {day: sum(values) / len(values) for day, values in by_day.items()}
 
 
 def _put(entry: dict[str, Any], key: str, value: Any) -> None:

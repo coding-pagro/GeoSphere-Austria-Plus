@@ -144,6 +144,19 @@ class TestCurrentProperties:
 # Condition derivation from TAWES data
 # ---------------------------------------------------------------------------
 
+@pytest.fixture
+def sun_high(monkeypatch):
+    """Sonne hoch genug, dass die TAWES-Sonnenscheindauer Bewölkung anzeigt."""
+    monkeypatch.setattr(GeoSphereWeatherEntity, "_sunshine_is_measurable", lambda self: True)
+
+
+@pytest.fixture
+def sun_low(monkeypatch):
+    """Sonne zu tief (Nacht oder Dämmerung): SO sagt nichts über Bewölkung."""
+    monkeypatch.setattr(GeoSphereWeatherEntity, "_sunshine_is_measurable", lambda self: False)
+
+
+@pytest.mark.usefixtures("sun_high")
 class TestConditionDerivation:
     def _set(self, coord, **kwargs):
         defaults = {"RR": 0.0, "RF": 50.0, "FF": 2.0, "FX": 3.0, "SH": 0.0, "SO": 600}
@@ -222,6 +235,68 @@ class TestConditionDerivation:
         forecast_coord.data = []
         cond = entity.condition
         assert cond is None  # Kein TAWES, keine Vorhersage → kein Zustand ableitbar
+
+
+class TestSunshineProxyAtLowSun:
+    """SO ist bei tiefer Sonne auch unter klarem Himmel 0 (gemessen 2026-11-14,
+    Wien Hohe Warte: Zählbeginn bei rund 3°, volle 600 s ab 4,4°)."""
+
+    @pytest.mark.parametrize(
+        ("utc_time", "expected"),
+        [
+            (datetime(2026, 11, 14, 6, 20, tzinfo=timezone.utc), False),  # rund 2°
+            (datetime(2026, 11, 14, 7, 30, tzinfo=timezone.utc), True),   # rund 11°
+            (datetime(2026, 11, 14, 22, 0, tzinfo=timezone.utc), False),  # Nacht
+        ],
+    )
+    def test_sunshine_is_measurable_follows_sun_elevation(self, entity, utc_time, expected):
+        with patch("custom_components.geosphere_austria_plus.weather.datetime") as mock_dt:
+            mock_dt.now.return_value = utc_time
+            assert entity._sunshine_is_measurable() is expected
+
+    @pytest.mark.usefixtures("sun_low")
+    @pytest.mark.parametrize(
+        ("forecast_tcc", "expected"),
+        [(0.1, "clear-night"), (0.95, "cloudy"), (None, "clear-night")],
+    )
+    def test_night_condition_uses_forecast_cloud_cover(
+        self, entity, current_coord, forecast_coord, forecast_tcc, expected
+    ):
+        """Nachts mit SO = 0: Die Bewölkung kommt aus der laufenden Vorhersagestunde."""
+        current_coord.data = {"RR": 0.0, "RF": 60.0, "FF": 2.0, "SH": 0.0, "SO": 0.0}
+        forecast_coord.data = [_future_entry(hours_ahead=0, tcc=forecast_tcc)]
+        entity._is_daytime = lambda: False
+
+        assert entity.condition == expected
+
+    @pytest.mark.usefixtures("sun_low")
+    def test_nowcast_night_cloud_coverage_comes_from_nwp(self, current_coord):
+        current_coord.data = {"SO": 0.0}
+        nowcast_coord = MagicMock()
+        dt = datetime.now(timezone.utc) + timedelta(minutes=15)
+        nowcast_coord.data = [{"datetime": dt.isoformat(), "t2m": 5.0, "rh2m": 80.0}]
+        nwp_coord = MagicMock()
+        nwp_coord.data = [_nwp_entry_with_tcc(0.25, 0.1)]
+        entity = _nowcast_entity(current_coord, nowcast_coord, {"nwp-v2-1h-1km": nwp_coord})
+        entity._is_dt_daytime = lambda _dt: False
+
+        forecasts = entity._build_hourly_forecasts()
+
+        assert forecasts[0]["cloud_coverage"] == 10
+        assert forecasts[0]["condition"] == "clear-night"
+
+    @pytest.mark.usefixtures("sun_low")
+    def test_nowcast_night_current_condition_uses_nwp_cloud_cover(self, current_coord):
+        current_coord.data = {"RR": 0.0, "RF": 60.0, "FF": 2.0, "SH": 0.0, "SO": 0.0}
+        nowcast_coord = MagicMock()
+        dt = datetime.now(timezone.utc) + timedelta(minutes=15)
+        nowcast_coord.data = [{"datetime": dt.isoformat(), "t2m": 5.0}]
+        nwp_coord = MagicMock()
+        nwp_coord.data = [_nwp_entry_with_tcc(0, 0.95)]
+        entity = _nowcast_entity(current_coord, nowcast_coord, {"nwp-v2-1h-1km": nwp_coord})
+        entity._is_daytime = lambda: False
+
+        assert entity.condition == "cloudy"
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +517,57 @@ class TestForecastPush:
 # ---------------------------------------------------------------------------
 # _build_hourly_forecasts
 # ---------------------------------------------------------------------------
+
+class TestForecastCloudCoverage:
+    """tcc (Anteil 0–1) erscheint als cloud_coverage in Prozent."""
+
+    def test_hourly_cloud_coverage_in_percent(self, entity, current_coord, forecast_coord):
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(tcc=0.34)]
+
+        assert entity._build_hourly_forecasts()[0].cloud_coverage == 34
+
+    def test_hourly_cloud_coverage_none_without_tcc(self, entity, current_coord, forecast_coord):
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(tcc=None)]
+
+        assert entity._build_hourly_forecasts()[0].cloud_coverage is None
+
+    def test_daily_cloud_coverage_is_mean_of_daily_window(
+        self, entity, current_coord, forecast_coord
+    ):
+        """Tageswert = Mittel über das Tagesfenster, klare Nachtstunden zählen nicht."""
+        current_coord.data = {}
+        base = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        # lon=16.37: das Tagesfenster 6–21 Uhr Ortszeit sind die UTC-Stunden 5–19.
+        forecast_coord.data = [
+            {
+                "datetime": (base + timedelta(hours=hour)).isoformat(),
+                "t2m": 15.0,
+                "rain_acc": 0.0,
+                "snow_acc": 0.0,
+                "rh2m": 60.0,
+                "u10m": 1.0,
+                "v10m": 0.0,
+                "tcc": 0.8 if 5 <= hour <= 19 else 0.0,
+            }
+            for hour in range(24)
+        ]
+
+        assert entity._build_daily_forecasts()[0].cloud_coverage == 80
+
+    def test_hourly_symbol_2_reads_sunny(self, entity, current_coord, forecast_coord):
+        """Symbol 2 („Heiter“) ergibt dieselbe Condition wie geringe Bewölkung ohne Symbol."""
+        current_coord.data = {}
+        entity._is_dt_daytime = lambda _dt: True
+        forecast_coord.data = [_future_entry(tcc=0.2, sy=2.0), _future_entry(tcc=0.2)]
+
+        with_symbol, without_symbol = entity._build_hourly_forecasts()
+        assert with_symbol.condition == without_symbol.condition == "sunny"
+
 
 class TestBuildHourlyForecasts:
     def test_basic_entry_is_included(self, entity, current_coord, forecast_coord):
@@ -1538,6 +1664,7 @@ def _nwp_entry_with_tcc(hours_ahead: float, tcc: float) -> dict:
     return {"datetime": dt.isoformat(), "tcc": tcc}
 
 
+@pytest.mark.usefixtures("sun_high")
 class TestResolveTccForNowcast:
     """Unit-Tests für GeoSphereWeatherEntity._resolve_tcc_for_nowcast."""
 

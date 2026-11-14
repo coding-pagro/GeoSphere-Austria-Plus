@@ -42,6 +42,7 @@ Optional sources (TAWES, warnings, air quality, Open-Meteo) keep their coordinat
 | `sensor.py` | TAWES sensors (13 of them, including `soil_temperature_10cm`), air-quality sensors, AQI aggregation, warning-level sensor with all-warnings attributes. |
 | `config_flow.py` | Config UI, options flow, station validation. |
 | `const.py` | API endpoints, parameter lists for each model, ensemble→NWP normalisation map, AQI breakpoints, condition thresholds, polling intervals. |
+| `daily_window.py` | `in_daily_window`: the 6–21 h local-solar window that daily aggregation uses for both GeoSphere days and Open-Meteo tail days (cloud cover is the window mean on both sides). |
 
 ### Weather Condition Derivation
 
@@ -51,7 +52,7 @@ Optional sources (TAWES, warnings, air quality, Open-Meteo) keep their coordinat
 - Rain: RR ≥ 0.2 mm/10 min → `rainy`
 - Snow: SH > 0.1 cm → `snowy`
 - Fog: RF ≥ 97% AND FF < 2 m/s → `fog`
-- Overcast / partly cloudy: based on SO (sunshine duration)
+- Overcast / partly cloudy: based on SO (sunshine duration) while the sun is at least 5° high (`_SUNSHINE_MIN_ELEVATION_DEG`); below that SO is 0 under any sky, so the cloud cover of the current forecast hour is used instead. The Nowcast `tcc` blend uses the same rule (`_sunshine_cloud_fraction`).
 - Windy: FF ≥ 10 m/s
 - Default: `sunny` / `clear-night`
 
@@ -61,7 +62,7 @@ Optional sources (TAWES, warnings, air quality, Open-Meteo) keep their coordinat
 
 The three forecast models use different parameter naming and value semantics. `api.py` normalises everything so `weather.py` can treat them uniformly:
 
-- **NWP (`nwp-v2-1h-1km`, C-LAEF control run)**: requests `2t,2r,10u,10v,10fg,rain,sf,tcc,ssrd,sy,snowlmt,cape,msl`, renamed to internal names via `NWP_PARAM_MAP` (`t2m`, `rh2m`, `u10m`/`v10m`, `wind_gust_speed`, `rain_acc`/`snow_acc`, `tcc`, `grad`, `sy`, `snowlmt`, `cape`, `pressure`). All values are **per interval** (no accumulation since model start → no de-accumulation). Interval parameters (`10fg`, `rain`, `sf`, `ssrd`, `sy` — `V2_INTERVAL_KEYS`) cover the hour **ending** at their timestamp (null at the run's t0); `_normalize_v2_params` moves them one step forward so every entry describes the hour **starting** at its timestamp, and drops the last step. Unit conversions: `tcc` % → fraction 0–1, `msl` Pa → hPa. No `mxt2m`/`mnt2m` → daily extremes come from min/max of hourly `t2m`.
+- **NWP (`nwp-v2-1h-1km`, C-LAEF control run)**: requests `2t,2r,10u,10v,10fg,rain,sf,tcc,ssrd,sy,snowlmt,cape,msl`, renamed to internal names via `NWP_PARAM_MAP` (`t2m`, `rh2m`, `u10m`/`v10m`, `wind_gust_speed`, `rain_acc`/`snow_acc`, `tcc`, `grad`, `sy`, `snowlmt`, `cape`, `pressure`). All values are **per interval** (no accumulation since model start → no de-accumulation). Interval parameters (`10fg`, `rain`, `sf`, `ssrd`, `sy` — `V2_INTERVAL_KEYS`) cover the hour **ending** at their timestamp (null at the run's t0); `_normalize_v2_params` moves them one step forward so every entry describes the hour **starting** at its timestamp, and drops the last step. `tcc` is instantaneous but moves with them (`V2_SHIFTED_KEYS`): the cloud classes of `sy` bin `tcc` at `sy`'s own stamp, so condition and `cloud_coverage` of an entry agree. Unit conversions: `tcc` % → fraction 0–1, `msl` Pa → hPa. No `mxt2m`/`mnt2m` → daily extremes come from min/max of hourly `t2m`.
 - **Ensemble (`ensemble-v2-1h-1km`)**: requests the `_p50` (median) variants of the same parameters except `sy` (not offered). `ENSEMBLE_PARAM_MAP` is derived from `NWP_PARAM_MAP`; same normalisation as NWP.
 - **Legacy v1 models** (`nwp-v1-1h-2500m`, `ensemble-v1-1h-2500m`) were shut down by GeoSphere on 2026-11-04. `async_migrate_entry` (config entry VERSION 1 → 2) rewrites stored model IDs via `LEGACY_FORECAST_MODEL_MAP` and migrates the weather entities' unique IDs (`geosphere_plus_{entry_id}_{model}`) so entity IDs survive.
 - **Nowcast (`nowcast-v1-15min-1km`)**: requests `t2m,rh2m,ff,dd,fx,rr,pt`. Wind components are reconstructed from scalar `ff`/`dd`. Precipitation type `pt` (GeoSphere's table: 1 rain, 3 freezing rain, 5 snow, 7 rain and snow, 255 none — see `const.py`) splits the `rr` rate into the `rain_acc`/`snow_acc` slots that downstream code expects. `tcc` is unavailable (set to `None`).
@@ -94,7 +95,7 @@ Beyond standard HA Forecast fields (`native_temperature`, `native_precipitation`
 
 ## Testing
 
-604 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Because the coordinator base class is a stand-in, any type-only stub on a mixin must sit under `if TYPE_CHECKING:` — a runtime method on `_RetryMixin` would shadow `DataUpdateCoordinator` in the MRO (`TestAsyncRefreshReachesBase` guards this). Key test files:
+629 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Because the coordinator base class is a stand-in, any type-only stub on a mixin must sit under `if TYPE_CHECKING:` — a runtime method on `_RetryMixin` would shadow `DataUpdateCoordinator` in the MRO (`TestAsyncRefreshReachesBase` guards this). Key test files:
 
 - `test_api.py` — HTTP client, parameter URL building, GeoJSON parsing, v2 + nowcast normalisation (names, units).
 - `test_coordinator.py` — Fibonacci-backoff retry, last-known-good caching.

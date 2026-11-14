@@ -135,6 +135,13 @@ ENSEMBLE_PARAMS = ",".join(ENSEMBLE_PARAM_MAP)
 # die an seinem Zeitstempel BEGINNT (Konvention der HA-Vorhersage).
 V2_INTERVAL_KEYS = ("wind_gust_speed", "rain_acc", "snow_acc", "grad", "sy")
 
+# Was api.py einen Schritt vorzieht: die Intervallgrößen und tcc. tcc ist ein
+# Momentanwert, die Bewölkungsstufen von sy (1–5) geben aber tcc an sys eigenem
+# Zeitstempel wieder (Stichprobe 2026-11-14, Lauf 09:00Z, fünf Orte: 293 von
+# 293 Stunden am selben Zeitstempel, 218 eine Stunde früher). Mitverschoben
+# passen Condition und cloud_coverage eines Eintrags zusammen.
+V2_SHIFTED_KEYS = (*V2_INTERVAL_KEYS, "tcc")
+
 # Vorhersageparameter (Nowcast)
 NOWCAST_PARAMS = "t2m,rh2m,ff,dd,fx,rr,pt"
 

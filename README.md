@@ -148,6 +148,8 @@ Die Condition wird aus den TAWES-Echtzeitdaten abgeleitet (Priorität höchste z
 | 8 | `windy` | FF ≥ 10 m/s |
 | 9 | `sunny` / `clear-night` | Default |
 
+Die Sonnenscheindauer (SO) sagt nur etwas über die Bewölkung aus, solange die Sonne mindestens 5° über dem Horizont steht; darunter ist sie auch bei klarem Himmel null. Nachts, in der Dämmerung oder an Stationen ohne SO-Messung kommt die Bewölkung für Priorität 6 und 7 deshalb aus der laufenden Vorhersagestunde. Abschattung durch Berge erkennt die Integration nicht: Liegt die Station im Tal im Schatten, kann sie trotz klarem Himmel `cloudy` melden.
+
 Ist keine TAWES-Station konfiguriert, werden alle aktuellen Werte (Condition, Temperatur, Feuchte, Wind, Niederschlag) aus dem ersten verfügbaren Vorhersagepunkt abgeleitet. Der Taupunkt bleibt leer, da die Modelle ihn nicht liefern; beim Nowcast fehlt zusätzlich der Luftdruck.
 
 Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32 Codes inkl. Gewitter), sowie Wolkenbedeckung (`tcc`), Niederschlag (`rain_acc`, `snow_acc`) und Wind aus dem NWP-Modell verwendet. Bei stündlichen Vorhersagen wird `sy` direkt verwendet; für Tagesvorhersagen wird der ungünstigste (signifikanteste) `sy`-Code der Tagesstunden herangezogen. Akkumulierte Niederschlagssummen können die symbolbasierte Bedingung überschreiben, jedoch nicht `lightning-rainy` abstufen. Hohe Windgeschwindigkeiten (≥ 10 m/s) ergeben `windy` bzw. `windy-variant` bei klaren oder bewölkten Bedingungen.
@@ -160,7 +162,7 @@ Die GeoSphere-Modelle **NWP** und **Ensemble** liefern stündliche Daten für ru
 
 ### Attribute
 
-Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Luftfeuchtigkeit, Luftdruck) liefert die Integration je Forecast-Slot folgende Zusatzattribute, die in Dashboards (z. B. via `state_attr()`) verwendet werden können:
+Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Luftfeuchtigkeit, Luftdruck, Bewölkung) liefert die Integration je Forecast-Slot folgende Zusatzattribute, die in Dashboards (z. B. via `state_attr()`) verwendet werden können:
 
 | Attribut | Einheit | Quelle | Stündlich | Täglich |
 |---|---|---|---|---|
@@ -171,7 +173,7 @@ Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Lu
 
 - **`snow_altitude`** ist die Schneefallgrenze in Metern – hochrelevant im Bergland. Im Tagesforecast wird das Tagesminimum geliefert (= tiefstes Niveau, auf das Schneefall reicht).
 - **`cape`** quantifiziert das Gewitterpotenzial. Werte >1000 J/kg deuten auf Gewitter hin, >2500 auf schwere Gewitter. Im Tagesforecast wird das Tagesmaximum geliefert.
-- **`uv_index`** ist das WMO-UV-Tagesmaximum. Wird nur befüllt, wenn die Open-Meteo-Verlängerung aktiviert ist, und nur für die Tage, die Open-Meteo abdeckt (d. h. nach Ablauf der GeoSphere-Daten). Zusätzlich werden für diese Tage die HA-Standardfelder `apparent_temperature`, `dew_point`, `cloud_coverage`, `pressure`, `precipitation_probability` aus Open-Meteo befüllt.
+- **`uv_index`** ist das WMO-UV-Tagesmaximum. Wird nur befüllt, wenn die Open-Meteo-Verlängerung aktiviert ist, und nur für die Tage, die Open-Meteo abdeckt (d. h. nach Ablauf der GeoSphere-Daten). Zusätzlich werden für diese Tage die HA-Standardfelder `apparent_temperature`, `dew_point`, `cloud_coverage`, `pressure`, `precipitation_probability` aus Open-Meteo befüllt. `cloud_coverage` ist dabei wie bei den GeoSphere-Tagen das Mittel über die Tagstunden (6 bis 21 Uhr Ortszeit), damit die Werte an der Grenze zwischen beiden Quellen vergleichbar bleiben.
 
 ---
 
@@ -259,10 +261,10 @@ automation:
 
 ## Bekannte Einschränkungen
 
-- **Geographischer Geltungsbereich:** GeoSphere DataHub liefert nur Daten für **Österreich**. Außerhalb des österreichischen Bundesgebiets sind die Vorhersagen ungenau oder leer.
+- **Geltungsbereich:** Die Integration ist für Standorte in Österreich gedacht.
 - **Nowcast hat kein Daily-Forecast:** Das Nowcast-Modell liefert nur 2–3 h Voraus — die Entität exponiert daher nur die stündliche Vorhersage, kein `forecast.daily`.
 - **Ensemble liefert kein Wettersymbol:** Ohne `sy` wird die Condition im Ensemble aus Bewölkung, Niederschlag und Wind abgeleitet; Gewitter (`lightning-rainy`) werden daher nur vom NWP-Modell erkannt.
-- **API-Rate-Limits unbekannt:** GeoSphere veröffentlicht keine harten Rate-Limits. Die Polling-Intervalle sind konservativ gewählt; bei produktivem Einsatz keine Reduzierung empfohlen.
+- **API-Rate-Limits:** Die GeoSphere-API erlaubt 5 Anfragen pro Sekunde und 240 pro Stunde und nennt beide Grenzen in jedem Antwort-Header. Ein Standort mit Station, einem Vorhersagemodell und Luftqualität verursacht rund 8 Anfragen pro Stunde; jedes weitere Modell eine zusätzliche.
 - **Warnungs-API ist deutsch-only:** Die Warntexte aus `warnungen.zamg.at` sind ausschließlich deutsch.
 
 ---

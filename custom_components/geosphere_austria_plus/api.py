@@ -23,7 +23,7 @@ from .const import (
     NOWCAST_PT_SNOW,
     ENSEMBLE_PARAMS,
     ENSEMBLE_PARAM_MAP,
-    V2_INTERVAL_KEYS,
+    V2_SHIFTED_KEYS,
     WARNINGS_API_BASE,
     CHEM_RESOURCE,
     CHEM_PARAMS,
@@ -126,8 +126,9 @@ class GeoSphereApi:
 
         Intervallgrößen (V2_INTERVAL_KEYS) gelten für die Stunde, die am
         Zeitstempel endet. Sie werden einen Schritt vorgezogen, damit jeder
-        Eintrag die Stunde beschreibt, die an seinem Zeitstempel beginnt. Der
-        letzte Zeitschritt hat keinen Nachfolger und entfällt.
+        Eintrag die Stunde beschreibt, die an seinem Zeitstempel beginnt; tcc
+        wandert mit, damit es zu sy passt (V2_SHIFTED_KEYS). Der letzte
+        Zeitschritt hat keinen Nachfolger und entfällt.
         """
         normalized = []
         for entry in entries:
@@ -140,7 +141,7 @@ class GeoSphereApi:
                 new["pressure"] = round(new["pressure"] / 100.0, 1)
             normalized.append(new)
         for current, following in zip(normalized, normalized[1:]):
-            for key in V2_INTERVAL_KEYS:
+            for key in V2_SHIFTED_KEYS:
                 if key in current:
                     current[key] = following.get(key)
         return normalized[:-1]
