@@ -6,11 +6,11 @@ from collections.abc import Iterator
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     DOMAIN,
@@ -105,6 +105,25 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_refresh_optional(
+    coordinator: DataUpdateCoordinator[Any], source: str
+) -> None:
+    """Ersten Abruf einer optionalen Quelle versuchen, ohne die Einrichtung abzubrechen.
+
+    Der Coordinator bleibt auch bei einem Fehler bestehen: Seine Entitäten sind
+    dann „nicht verfügbar“ und erholen sich beim nächsten regulären Abruf.
+    Würde er verworfen, legten die Plattformen keine Entitäten an und die
+    Aufräum-Logik in async_setup_entry entfernte sie bis zum nächsten Neuladen.
+    """
+    await coordinator.async_refresh()
+    if not coordinator.last_update_success:
+        _LOGGER.warning(
+            "%s beim Start nicht erreichbar – die Entitäten bleiben bis zum "
+            "ersten erfolgreichen Abruf nicht verfügbar",
+            source,
+        )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Eintrag einrichten."""
     # Koordinaten: Options haben Vorrang vor Data
@@ -169,15 +188,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # TAWES-Koordinator nur wenn Station konfiguriert
     if station_id:
         current_coordinator = GeoSphereCurrentCoordinator(hass, station_id)
-        try:
-            await current_coordinator.async_config_entry_first_refresh()
-            coordinators[DATA_CURRENT] = current_coordinator
-        except ConfigEntryNotReady as err:
-            _LOGGER.warning(
-                "TAWES-Station %s nicht erreichbar: %s – Integration läuft ohne Stationsdaten",
-                station_id,
-                err,
-            )
+        await _async_refresh_optional(current_coordinator, f"TAWES-Station {station_id}")
+        coordinators[DATA_CURRENT] = current_coordinator
 
     # Vorhersage-Koordinatoren (immer, basierend auf konfigurierten Koordinaten)
     # ConfigEntryNotReady propagiert hier bewusst – Forecasts sind Kernfunktionalität
@@ -189,38 +201,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Warnungs-Koordinator (optional, konfigurierbar)
     if enable_warnings:
         warnings_coordinator = GeoSphereWarningsCoordinator(hass, lat, lon)
-        try:
-            await warnings_coordinator.async_config_entry_first_refresh()
-            coordinators[DATA_WARNINGS] = warnings_coordinator
-        except ConfigEntryNotReady as err:
-            _LOGGER.warning(
-                "Warnungs-API nicht erreichbar: %s – Integration läuft ohne Warnungen weiter",
-                err,
-            )
+        await _async_refresh_optional(warnings_coordinator, "Warnungs-API")
+        coordinators[DATA_WARNINGS] = warnings_coordinator
 
     # Luftqualitäts-Koordinator (optional, konfigurierbar)
     if enable_air_quality:
         aq_coordinator = GeoSphereAirQualityCoordinator(hass, lat, lon)
-        try:
-            await aq_coordinator.async_config_entry_first_refresh()
-            coordinators[DATA_AIR_QUALITY] = aq_coordinator
-        except ConfigEntryNotReady as err:
-            _LOGGER.warning(
-                "Schadstoff-API nicht erreichbar: %s – Integration läuft ohne Luftqualitätsdaten weiter",
-                err,
-            )
+        await _async_refresh_optional(aq_coordinator, "Schadstoff-API")
+        coordinators[DATA_AIR_QUALITY] = aq_coordinator
 
     # Open-Meteo daily tail extension (optional, configurable)
     if enable_open_meteo:
         om_coordinator = GeoSphereOpenMeteoDailyCoordinator(hass, lat, lon)
-        try:
-            await om_coordinator.async_config_entry_first_refresh()
-            coordinators[DATA_OPEN_METEO_DAILY] = om_coordinator
-        except ConfigEntryNotReady as err:
-            _LOGGER.warning(
-                "Open-Meteo nicht erreichbar: %s – Integration läuft ohne Tagesverlängerung weiter",
-                err,
-            )
+        await _async_refresh_optional(om_coordinator, "Open-Meteo")
+        coordinators[DATA_OPEN_METEO_DAILY] = om_coordinator
 
     # Set für aktive Entity-Unique-IDs upfront initialisieren, damit Cleanup
     # auch dann robust läuft, wenn eine Plattform mid-setup eine Exception wirft.

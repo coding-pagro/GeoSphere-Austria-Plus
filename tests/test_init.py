@@ -1,4 +1,7 @@
 """Tests für async_setup_entry in __init__.py (bedingte Coordinator-Erstellung)."""
+import logging
+from contextlib import ExitStack
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -42,12 +45,19 @@ def _make_hass():
 
 
 def _make_coordinator_mock(raises=False):
-    """Erstellt einen Mock-Coordinator; optional mit ConfigEntryNotReady beim ersten Refresh."""
+    """Erstellt einen Mock-Coordinator; optional mit fehlgeschlagenem ersten Abruf.
+
+    Vorhersage-Coordinatoren nutzen async_config_entry_first_refresh (wirft
+    ConfigEntryNotReady), optionale Quellen async_refresh (wirft nicht, setzt
+    last_update_success auf False).
+    """
     mock = MagicMock()
     if raises:
         mock.async_config_entry_first_refresh = AsyncMock(side_effect=Exception("API down"))
     else:
         mock.async_config_entry_first_refresh = AsyncMock()
+    mock.async_refresh = AsyncMock()
+    mock.last_update_success = not raises
     return mock
 
 
@@ -363,8 +373,8 @@ class TestOpenMeteoCoordinatorConditional:
 
         MockOM.assert_not_called()
 
-    async def test_open_meteo_config_entry_not_ready_does_not_fail_setup(self):
-        """ConfigEntryNotReady from Open-Meteo must not abort integration setup."""
+    async def test_open_meteo_failed_first_refresh_does_not_fail_setup(self):
+        """A failing Open-Meteo request must not abort integration setup."""
         entry = _make_entry(data={**_BASE_DATA, CONF_ENABLE_OPEN_METEO: True})
         hass = _make_hass()
         om_instance = _make_coordinator_mock(raises=True)
@@ -381,7 +391,8 @@ class TestOpenMeteoCoordinatorConditional:
             # Must complete without raising
             await async_setup_entry(hass, entry)
 
-        assert DATA_OPEN_METEO_DAILY not in hass.data[DOMAIN][entry.entry_id]
+        # The coordinator is kept so the regular polling can recover later.
+        assert hass.data[DOMAIN][entry.entry_id][DATA_OPEN_METEO_DAILY] is om_instance
 
     async def test_open_meteo_disabled_via_options_overrides_data(self):
         """Options override data: data=True, options=False → disabled."""
@@ -403,6 +414,120 @@ class TestOpenMeteoCoordinatorConditional:
             await async_setup_entry(hass, entry)
 
         MockOM.assert_not_called()
+
+
+_OPTIONAL_SOURCES = [
+    ("GeoSphereCurrentCoordinator", DATA_CURRENT, {CONF_STATION_ID: "11035"}),
+    ("GeoSphereWarningsCoordinator", DATA_WARNINGS, {CONF_ENABLE_WARNINGS: True}),
+    ("GeoSphereAirQualityCoordinator", DATA_AIR_QUALITY, {CONF_ENABLE_AIR_QUALITY: True}),
+    ("GeoSphereOpenMeteoDailyCoordinator", DATA_OPEN_METEO_DAILY, {CONF_ENABLE_OPEN_METEO: True}),
+]
+
+
+class TestFirstRefreshFailure:
+    """Ein fehlgeschlagener erster Abruf darf optionale Quellen nicht entfernen."""
+
+    @staticmethod
+    async def _setup(hass, entry, failing_class=None, registered=()):
+        """Einrichtung mit gemockten Coordinatoren; liefert (failing_mock, registry_mock)."""
+        failing = _make_coordinator_mock(raises=True)
+        with ExitStack() as stack:
+            for class_name, _, _ in _OPTIONAL_SOURCES:
+                instance = failing if class_name == failing_class else _make_coordinator_mock()
+                stack.enter_context(
+                    patch(f"{_PATCH_BASE}.{class_name}", return_value=instance)
+                )
+            stack.enter_context(
+                patch(
+                    f"{_PATCH_BASE}.GeoSphereForecastCoordinator",
+                    return_value=_make_coordinator_mock(),
+                )
+            )
+            mock_er = stack.enter_context(patch(f"{_PATCH_BASE}.er"))
+            mock_er.async_entries_for_config_entry.return_value = list(registered)
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+        return failing, mock_er.async_get.return_value
+
+    @pytest.mark.parametrize(("class_name", "data_key", "config"), _OPTIONAL_SOURCES)
+    async def test_optional_coordinator_is_kept(self, class_name, data_key, config, caplog):
+        entry = _make_entry(data={**_BASE_DATA, **config})
+        hass = _make_hass()
+
+        with caplog.at_level(logging.WARNING):
+            failing, _ = await self._setup(hass, entry, failing_class=class_name)
+
+        failing.async_refresh.assert_awaited_once()
+        failing.async_config_entry_first_refresh.assert_not_awaited()
+        assert hass.data[DOMAIN][entry.entry_id][data_key] is failing
+        assert "nicht verfügbar" in caplog.text
+
+    async def test_successful_first_refresh_logs_no_warning(self, caplog):
+        entry = _make_entry(data={**_BASE_DATA, CONF_STATION_ID: "11035"})
+        hass = _make_hass()
+
+        with caplog.at_level(logging.WARNING):
+            await self._setup(hass, entry)
+
+        assert "nicht verfügbar" not in caplog.text
+
+    async def test_failed_forecast_refresh_still_aborts_setup(self):
+        """Vorhersagen sind Kernfunktion: Home Assistant wiederholt die Einrichtung."""
+        entry = _make_entry(data=_BASE_DATA)
+        hass = _make_hass()
+
+        with (
+            patch(
+                f"{_PATCH_BASE}.GeoSphereForecastCoordinator",
+                return_value=_make_coordinator_mock(raises=True),
+            ),
+            patch(f"{_PATCH_BASE}.er"),
+            pytest.raises(Exception, match="API down"),
+        ):
+            from custom_components.geosphere_austria_plus import async_setup_entry
+            await async_setup_entry(hass, entry)
+
+    @staticmethod
+    def _forward_to_sensor_platform(hass):
+        """Lässt async_forward_entry_setups die echte Sensor-Plattform einrichten."""
+        async def _forward(entry, _platforms):
+            from custom_components.geosphere_austria_plus import sensor
+            await sensor.async_setup_entry(hass, entry, MagicMock())
+
+        hass.config_entries.async_forward_entry_setups = AsyncMock(side_effect=_forward)
+
+    async def test_tawes_entities_survive_failed_first_refresh(self):
+        entry = _make_entry(data={
+            **_BASE_DATA,
+            CONF_STATION_ID: "11035",
+            CONF_ENABLE_WARNINGS: False,
+            CONF_ENABLE_AIR_QUALITY: False,
+        })
+        hass = _make_hass()
+        self._forward_to_sensor_platform(hass)
+        registered = MagicMock()
+        registered.unique_id = f"geosphere_plus_{entry.entry_id}_temperature"
+
+        _, registry = await self._setup(
+            hass, entry, failing_class="GeoSphereCurrentCoordinator", registered=[registered]
+        )
+
+        registry.async_remove.assert_not_called()
+
+    async def test_tawes_entities_removed_when_station_deselected(self):
+        entry = _make_entry(data={
+            **_BASE_DATA,
+            CONF_ENABLE_WARNINGS: False,
+            CONF_ENABLE_AIR_QUALITY: False,
+        })
+        hass = _make_hass()
+        self._forward_to_sensor_platform(hass)
+        registered = MagicMock()
+        registered.unique_id = f"geosphere_plus_{entry.entry_id}_temperature"
+
+        _, registry = await self._setup(hass, entry, registered=[registered])
+
+        registry.async_remove.assert_called_once_with(registered.entity_id)
 
 
 class TestAsyncUnloadEntry:

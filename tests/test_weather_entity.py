@@ -1794,6 +1794,20 @@ class TestBuildDailyForecastsWithOpenMeteo:
         assert len(match) == 1
         assert match[0]["condition"] == "pouring"
 
+    def test_incomplete_gs_day_kept_while_om_has_no_data(self, forecast_coord):
+        """Open-Meteo is configured but has not delivered yet: nothing can replace
+        an incomplete GeoSphere day, so it must not be dropped."""
+        forecast_coord.data = self._gs_day_entries(day_offset=1, count=12)
+        om = _om_coordinator([])
+        om.data = None
+        entity = self._entity_with_om(forecast_coord, om)
+
+        forecasts = entity._build_daily_forecasts()
+
+        tomorrow_key = (date.today() + timedelta(days=1)).isoformat()
+        match = [f for f in forecasts if f["datetime"].startswith(tomorrow_key)]
+        assert len(match) == 1
+
     def test_today_always_uses_gs_even_with_one_entry(self, forecast_coord):
         """Today's GeoSphere data is always preferred, regardless of coverage hour."""
         # Single recent entry (30 min ago) — passes the recency filter and represents today.
