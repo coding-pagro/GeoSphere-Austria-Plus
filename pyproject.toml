@@ -20,6 +20,11 @@ show_error_codes = true
 module = ["voluptuous", "voluptuous.*"]
 ignore_missing_imports = true
 
+# astral (a Home Assistant core dependency) ships no py.typed marker.
+[[tool.mypy.overrides]]
+module = ["astral", "astral.*"]
+ignore_missing_imports = true
+
 # Only the integration source is strict-checked; the test suite uses
 # heavy MagicMock patching that fights mypy more than it helps.
 [[tool.mypy.overrides]]

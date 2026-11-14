@@ -18,8 +18,12 @@ from .const import (
     NWP_PARAMS,
     NWP_PARAM_MAP,
     NOWCAST_PARAMS,
+    NOWCAST_PT_NO_PRECIPITATION,
+    NOWCAST_PT_RAIN_AND_SNOW,
+    NOWCAST_PT_SNOW,
     ENSEMBLE_PARAMS,
     ENSEMBLE_PARAM_MAP,
+    V2_INTERVAL_KEYS,
     WARNINGS_API_BASE,
     CHEM_RESOURCE,
     CHEM_PARAMS,
@@ -118,7 +122,12 @@ class GeoSphereApi:
         v2 nutzt GRIB-Kurznamen (2t, 10u, …), Ensemble zusätzlich das Suffix
         _p50. Durch die Umbenennung kann weather.py alle Modelle identisch
         verarbeiten. Einheiten werden angeglichen: tcc % → Anteil 0–1,
-        msl Pa → hPa. Niederschlag und Strahlung sind bereits Intervallwerte.
+        msl Pa → hPa.
+
+        Intervallgrößen (V2_INTERVAL_KEYS) gelten für die Stunde, die am
+        Zeitstempel endet. Sie werden einen Schritt vorgezogen, damit jeder
+        Eintrag die Stunde beschreibt, die an seinem Zeitstempel beginnt. Der
+        letzte Zeitschritt hat keinen Nachfolger und entfällt.
         """
         normalized = []
         for entry in entries:
@@ -130,7 +139,11 @@ class GeoSphereApi:
             if new.get("pressure") is not None:
                 new["pressure"] = round(new["pressure"] / 100.0, 1)
             normalized.append(new)
-        return normalized
+        for current, following in zip(normalized, normalized[1:]):
+            for key in V2_INTERVAL_KEYS:
+                if key in current:
+                    current[key] = following.get(key)
+        return normalized[:-1]
 
     @staticmethod
     def _normalize_nowcast_params(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -140,8 +153,8 @@ class GeoSphereApi:
         statt rain_acc/snow_acc, sowie ff/dd statt u10m/v10m.
         Wolkenbedeckung (tcc) ist nicht verfügbar → None.
 
-        pt-Kodierung (WMO-Konvention): 0/255=kein Niederschlag, 1=Regen,
-        2=Schnee, 3=gemischt/Schneeregen.
+        pt-Kodierung (von GeoSphere bestätigt, siehe const.py): 1=Regen,
+        3=gefrierender Regen, 5=Schnee, 7=Schneeregen, 255=kein Niederschlag.
         """
         normalized = []
         for entry in entries:
@@ -152,13 +165,13 @@ class GeoSphereApi:
             except (ValueError, TypeError):
                 pt_int = 255
 
-            if rr == 0 or pt_int in (0, 255):
+            if rr == 0 or pt_int == NOWCAST_PT_NO_PRECIPITATION:
                 rain_acc, snow_acc = 0.0, 0.0
-            elif pt_int == 2:       # Schnee
+            elif pt_int == NOWCAST_PT_SNOW:
                 rain_acc, snow_acc = 0.0, rr
-            elif pt_int == 3:       # Schneeregen
+            elif pt_int == NOWCAST_PT_RAIN_AND_SNOW:
                 rain_acc, snow_acc = rr * 0.5, rr * 0.5
-            else:                   # 1=Regen und unbekannte Typen
+            else:  # Regen, gefrierender Regen und unbekannte Codes
                 rain_acc, snow_acc = rr, 0.0
 
             # Windvektor aus Betrag (ff) und Richtung (dd) rekonstruieren
