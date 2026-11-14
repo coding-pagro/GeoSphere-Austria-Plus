@@ -8,6 +8,8 @@ from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any, cast
 
+from astral import Observer
+from astral.sun import elevation as solar_elevation
 from homeassistant.components.weather import Forecast, WeatherEntity
 from homeassistant.components.weather.const import WeatherEntityFeature
 from homeassistant.config_entries import ConfigEntry
@@ -17,7 +19,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfLength,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -62,6 +64,10 @@ _FOG_VISIBILITY_HUM = 97       # RF > 97 % → potentiell Nebel
 _WIND_STRONG_MS = 10.0         # FF > 10 m/s → windig
 _CLOUD_FULL = 0.875            # Als bewölkt gilt > 87.5 % SO-Ausfall
 _SUN_SECONDS_MAX = 600         # SO max. 600 s Sonnenschein je 10-Minuten-Intervall
+
+# Tag/Nacht einer Vorhersagestunde wird in ihrer Mitte beurteilt, damit eine
+# überwiegend dunkle Stunde als Nacht zählt.
+_HOURLY_ROW_MIDPOINT = timedelta(minutes=30)
 
 
 # Mapping from GeoSphere symbol codes (sy, 1–32) to HA weather conditions.
@@ -190,6 +196,11 @@ async def async_setup_entry(
         if CONF_LONGITUDE in entry.options
         else entry.data.get(CONF_LONGITUDE, 14.0)
     )
+    lat: float = (
+        entry.options[CONF_LATITUDE]
+        if CONF_LATITUDE in entry.options
+        else entry.data.get(CONF_LATITUDE, 47.5)
+    )
 
     # Options haben Vorrang (OptionsFlow), dann Data, dann Rückwärtskompatibilität
     # Explizite Schlüsselprüfung, damit eine leere Liste (0 Modelle) nicht übergangen wird
@@ -220,6 +231,7 @@ async def async_setup_entry(
             model=model,
             location_name=location_name,
             lon=lon,
+            lat=lat,
             all_forecast_coordinators=all_forecast_coordinators,
             open_meteo_coordinator=open_meteo_coordinator,
             open_meteo_forecast_days=open_meteo_forecast_days,
@@ -262,6 +274,7 @@ class GeoSphereWeatherEntity(
         all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] | None = None,
         open_meteo_coordinator: GeoSphereOpenMeteoDailyCoordinator | None = None,
         open_meteo_forecast_days: int = OPEN_METEO_FORECAST_DAYS_DEFAULT,
+        lat: float = 47.5,
     ) -> None:
         super().__init__(forecast_coordinator)
         self._current_coordinator = current_coordinator
@@ -269,6 +282,11 @@ class GeoSphereWeatherEntity(
         self._open_meteo_forecast_days = open_meteo_forecast_days
         self._model = model
         self._lon = lon
+        self._lat = lat
+        # Nowcast-Schritte sind nur 15 min lang — dort gilt der Zeitstempel selbst.
+        self._row_midpoint = (
+            timedelta(0) if "nowcast" in model else _HOURLY_ROW_MIDPOINT
+        )
         # All active forecast coordinators keyed by model name.
         # Used by Nowcast entities to resolve cloud-cover (tcc) from NWP data.
         self._all_forecast_coordinators: dict[str, GeoSphereForecastCoordinator] = (
@@ -508,15 +526,13 @@ class GeoSphereWeatherEntity(
         return None
 
     def _is_daytime(self) -> bool:
-        """Tag/Nacht aus sun.sun-Entity ableiten; Fallback auf Längengrad-Schätzung."""
+        """Tag/Nacht aus sun.sun-Entity ableiten; Fallback auf berechneten Sonnenstand."""
         hass = getattr(self, "hass", None)
         if hass is not None:
             sun_state = hass.states.get("sun.sun")
             if sun_state is not None:
                 return bool(sun_state.state == "above_horizon")
-        now_utc = datetime.now(timezone.utc)
-        local_hour = (now_utc.hour + self._lon / 15.0) % 24
-        return 6.0 <= local_hour < 21.0
+        return self._is_dt_daytime(datetime.now(timezone.utc))
 
     # ------------------------------------------------------------------
     # Stündliche Vorhersage
@@ -567,7 +583,7 @@ class GeoSphereWeatherEntity(
             wind_speed = math.sqrt(u10**2 + v10**2)
             wind_bearing = (math.degrees(math.atan2(u10, v10)) + 180) % 360
 
-            is_day = self._is_dt_daytime(dt)
+            is_day = self._is_dt_daytime(dt + self._row_midpoint)
             # sy (symbol code) is only present in NWP model output.
             sy = entry.get("sy") if "nwp" in self._model else None
             cond = nwp_to_condition(tcc, rain, snow, wind_speed, is_day, sy)
@@ -920,11 +936,16 @@ class GeoSphereWeatherEntity(
     # ------------------------------------------------------------------
 
     def _is_dt_daytime(self, dt: datetime) -> bool:
-        local_hour = (dt.hour + self._lon / 15.0) % 24
-        return 6.0 <= local_hour < 21.0
+        """True, wenn die Sonne zum Zeitpunkt dt am Standort über dem Horizont steht."""
+        return bool(solar_elevation(Observer(self._lat, self._lon), dt) > 0.0)
 
     def _entry_is_daytime(self, entry: dict[str, Any]) -> bool:
-        """Return True if the entry's datetime timestamp falls in daytime hours."""
+        """Return True if the entry falls into the daily-aggregation window.
+
+        Deliberately a fixed 6–21 h local-solar window rather than the sun's
+        position: the daily condition should reflect the hours people are up,
+        also on short winter days.
+        """
         ts = entry.get("datetime")
         if not ts:
             return False
@@ -932,7 +953,8 @@ class GeoSphereWeatherEntity(
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         except ValueError:
             return False
-        return self._is_dt_daytime(dt)
+        local_hour = (dt.hour + self._lon / 15.0) % 24
+        return 6.0 <= local_hour < 21.0
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -942,5 +964,23 @@ class GeoSphereWeatherEntity(
             )
         if self._open_meteo_coordinator is not None:
             self.async_on_remove(
-                self._open_meteo_coordinator.async_add_listener(self.async_write_ha_state)
+                self._open_meteo_coordinator.async_add_listener(
+                    self._handle_open_meteo_update
+                )
             )
+
+    # HA liefert Vorhersagen an abonnierte Karten (weather/subscribe_forecast)
+    # nur über async_update_listeners aus — ein reines State-Update reicht nicht.
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        super()._handle_coordinator_update()
+        self._push_forecast_listeners()
+
+    @callback
+    def _handle_open_meteo_update(self) -> None:
+        self.async_write_ha_state()
+        self._push_forecast_listeners()
+
+    def _push_forecast_listeners(self) -> None:
+        self.hass.async_create_task(self.async_update_listeners(None))

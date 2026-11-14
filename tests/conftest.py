@@ -66,6 +66,10 @@ class _MockCoordinatorEntity:
     def async_write_ha_state(self):
         pass
 
+    def _handle_coordinator_update(self):
+        """Mirror real CoordinatorEntity: write state on coordinator update."""
+        self.async_write_ha_state()
+
 
 class _MockDataUpdateCoordinator:
     def __class_getitem__(cls, item):

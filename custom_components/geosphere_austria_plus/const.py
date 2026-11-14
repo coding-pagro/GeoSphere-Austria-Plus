@@ -91,8 +91,9 @@ LEGACY_FORECAST_MODEL_MAP = {
 
 # Normalisierung: v2-Parameternamen → interne Namen
 # Ermöglicht identische Verarbeitung aller Modelle in weather.py.
-# Alle v2-Werte gelten für das zurückliegende Intervall bzw. den Zeitpunkt —
-# es gibt keine Akkumulation seit Modellstart mehr, daher keine De-Akkumulation.
+# Es gibt keine Akkumulation seit Modellstart mehr, daher keine De-Akkumulation.
+# Intervallgrößen gelten für die Stunde, die am Zeitstempel ENDET — siehe
+# V2_INTERVAL_KEYS.
 # - 10fg: skalare Max-Böe im Intervall (m/s)
 # - rain/sf: Niederschlag im Intervall (kg/m² ≈ mm)
 # - tcc: Wolkenbedeckung in % → api.py rechnet auf Anteil 0–1 um
@@ -126,8 +127,23 @@ ENSEMBLE_PARAM_MAP = {
 }
 ENSEMBLE_PARAMS = ",".join(ENSEMBLE_PARAM_MAP)
 
+# Interne Namen der v2-Größen, die das Intervall beschreiben, das am Zeitstempel
+# ENDET ("in the last forecast interval" laut /metadata; am Laufbeginn t0
+# liefert die API dafür null — gemessen 2026-11-14 für NWP und Ensemble). Alle
+# übrigen Größen sind Momentanwerte am Zeitstempel. api.py zieht die
+# Intervallwerte einen Schritt vor, damit jeder Eintrag die Stunde beschreibt,
+# die an seinem Zeitstempel BEGINNT (Konvention der HA-Vorhersage).
+V2_INTERVAL_KEYS = ("wind_gust_speed", "rain_acc", "snow_acc", "grad", "sy")
+
 # Vorhersageparameter (Nowcast)
 NOWCAST_PARAMS = "t2m,rh2m,ff,dd,fx,rr,pt"
+
+# Nowcast-Niederschlagstyp (pt). Fehlt in /metadata; von GeoSphere bestätigt:
+# https://github.com/Geosphere-Austria/dataset-api-docs/issues/71
+# 3 (gefrierender Regen) fällt flüssig und zählt daher als Regen.
+NOWCAST_PT_SNOW = 5
+NOWCAST_PT_RAIN_AND_SNOW = 7
+NOWCAST_PT_NO_PRECIPITATION = 255
 
 # Open-Meteo (daily forecast tail extension)
 CONF_ENABLE_OPEN_METEO = "enable_open_meteo"

@@ -205,25 +205,36 @@ Die Integration wird typischerweise eingesetzt für:
 
 1. **Lokale Wetteranzeige am Smart-Display** (Lovelace `weather-forecast`-Karte mit stündlicher Vorhersage).
 2. **Unwetter-Alerts via Notification**: Automation, die bei `sensor.geosphere_warning_level >= 2` (orange/rot) eine Push-Nachricht versendet.
-3. **PV-Steuerung mit Globalstrahlung** (`sensor.geosphere_global_radiation`) und CAPE (`state_attr('weather.geosphere', 'cape')`) — z. B. Wechselrichter-Standby vor Gewittern.
+3. **PV-Steuerung mit Globalstrahlung** (`sensor.geosphere_global_radiation`) und der Gewitter-Vorhersage (Condition `lightning-rainy` bzw. `cape` je Stunde, abrufbar über `weather.get_forecasts`) — z. B. Wechselrichter-Standby vor Gewittern.
 4. **Schneefall-Trigger im Bergland**: `forecast.snow_altitude < ele_haus` aktiviert Schneeräum-Reminder.
 5. **Luftqualitäts-Display** im Dashboard mit AQI-Sensor + Pollen-Sensoren aus anderen Integrationen.
 
 ### Beispiel-Automation: Gewitter-Voralarm
 
+Die Vorhersagewerte (auch `cape`) stehen nicht als Attribut an der Wetterentität, sondern in den Forecast-Einträgen. Die Automation ruft daher stündlich die Vorhersage ab und prüft, ob GeoSphere in den nächsten drei Stunden ein Gewitter-Symbol (`lightning-rainy`) ausgibt. Das ist verlässlicher als eine feste CAPE-Schwelle: GeoSphere vergibt Gewitter-Symbole oft schon bei CAPE-Werten weit unter 1000 J/kg.
+
 ```yaml
 automation:
   - alias: Gewitter-Vorwarnung
     trigger:
-      - platform: numeric_state
-        entity_id: weather.geosphere_nwp
-        attribute: cape
-        above: 1500
+      - platform: time_pattern
+        minutes: 5
     action:
+      - service: weather.get_forecasts
+        target:
+          entity_id: weather.geosphere_nwp
+        data:
+          type: hourly
+        response_variable: vorhersage
+      - condition: template
+        value_template: >
+          {{ vorhersage['weather.geosphere_nwp'].forecast[:3]
+             | selectattr('condition', 'eq', 'lightning-rainy')
+             | list | count > 0 }}
       - service: notify.mobile_app
         data:
           title: "Gewitter möglich"
-          message: "CAPE > 1500 J/kg in der Vorhersage."
+          message: "GeoSphere erwartet in den nächsten 3 Stunden ein Gewitter."
 ```
 
 ### Beispiel-Automation: Reaktion auf rote Warnung

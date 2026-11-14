@@ -59,10 +59,10 @@ All four coordinators inherit a `_RetryMixin` that:
 
 The three forecast models use different parameter naming and value semantics. `api.py` normalises everything so `weather.py` can treat them uniformly:
 
-- **NWP (`nwp-v2-1h-1km`, C-LAEF control run)**: requests `2t,2r,10u,10v,10fg,rain,sf,tcc,ssrd,sy,snowlmt,cape,msl`, renamed to internal names via `NWP_PARAM_MAP` (`t2m`, `rh2m`, `u10m`/`v10m`, `wind_gust_speed`, `rain_acc`/`snow_acc`, `tcc`, `grad`, `sy`, `snowlmt`, `cape`, `pressure`). All values are **per interval** (no accumulation since model start → no de-accumulation). Unit conversions: `tcc` % → fraction 0–1, `msl` Pa → hPa. No `mxt2m`/`mnt2m` → daily extremes come from min/max of hourly `t2m`.
+- **NWP (`nwp-v2-1h-1km`, C-LAEF control run)**: requests `2t,2r,10u,10v,10fg,rain,sf,tcc,ssrd,sy,snowlmt,cape,msl`, renamed to internal names via `NWP_PARAM_MAP` (`t2m`, `rh2m`, `u10m`/`v10m`, `wind_gust_speed`, `rain_acc`/`snow_acc`, `tcc`, `grad`, `sy`, `snowlmt`, `cape`, `pressure`). All values are **per interval** (no accumulation since model start → no de-accumulation). Interval parameters (`10fg`, `rain`, `sf`, `ssrd`, `sy` — `V2_INTERVAL_KEYS`) cover the hour **ending** at their timestamp (null at the run's t0); `_normalize_v2_params` moves them one step forward so every entry describes the hour **starting** at its timestamp, and drops the last step. Unit conversions: `tcc` % → fraction 0–1, `msl` Pa → hPa. No `mxt2m`/`mnt2m` → daily extremes come from min/max of hourly `t2m`.
 - **Ensemble (`ensemble-v2-1h-1km`)**: requests the `_p50` (median) variants of the same parameters except `sy` (not offered). `ENSEMBLE_PARAM_MAP` is derived from `NWP_PARAM_MAP`; same normalisation as NWP.
 - **Legacy v1 models** (`nwp-v1-1h-2500m`, `ensemble-v1-1h-2500m`) were shut down by GeoSphere on 2026-11-04. `async_migrate_entry` (config entry VERSION 1 → 2) rewrites stored model IDs via `LEGACY_FORECAST_MODEL_MAP` and migrates the weather entities' unique IDs (`geosphere_plus_{entry_id}_{model}`) so entity IDs survive.
-- **Nowcast (`nowcast-v1-15min-1km`)**: requests `t2m,rh2m,ff,dd,fx,rr,pt`. Wind components are reconstructed from scalar `ff`/`dd`. Precipitation type `pt` (WMO codes) splits the `rr` rate into the `rain_acc`/`snow_acc` slots that downstream code expects. `tcc` is unavailable (set to `None`).
+- **Nowcast (`nowcast-v1-15min-1km`)**: requests `t2m,rh2m,ff,dd,fx,rr,pt`. Wind components are reconstructed from scalar `ff`/`dd`. Precipitation type `pt` (GeoSphere's table: 1 rain, 3 freezing rain, 5 snow, 7 rain and snow, 255 none — see `const.py`) splits the `rr` rate into the `rain_acc`/`snow_acc` slots that downstream code expects. `tcc` is unavailable (set to `None`).
 
 ### API Endpoints
 
@@ -92,7 +92,7 @@ Beyond standard HA Forecast fields (`native_temperature`, `native_precipitation`
 
 ## Testing
 
-572 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Key test files:
+580 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Key test files:
 
 - `test_api.py` — HTTP client, parameter URL building, GeoJSON parsing, v2 + nowcast normalisation (names, units).
 - `test_coordinator.py` — Fibonacci-backoff retry, last-known-good caching.

@@ -337,29 +337,26 @@ class TestIsDaytime:
         entity.hass.states.get.return_value = sun_state
         assert entity._is_daytime() is False
 
-    def test_falls_back_to_longitude_when_sun_entity_unavailable(
+    def test_falls_back_to_sun_position_when_sun_entity_unavailable(
         self, entity, current_coord
     ):
         entity.hass = MagicMock()
         entity.hass.states.get.return_value = None
-        current_coord.data = {"_lon": 15.0}
-        # 12:00 UTC + 1h offset → 13:00 local → daytime
         with patch(
             "custom_components.geosphere_austria_plus.weather.datetime"
         ) as mock_dt:
             mock_dt.now.return_value = datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc)
             assert entity._is_daytime() is True
 
-    def test_falls_back_to_longitude_when_hass_not_set(self, entity, current_coord):
+    def test_falls_back_to_sun_position_when_hass_not_set(self, entity, current_coord):
         # hass not set at all (before async_added_to_hass)
         if hasattr(entity, "hass"):
             del entity.hass
-        current_coord.data = {"_lon": 15.0}
         with patch(
             "custom_components.geosphere_austria_plus.weather.datetime"
         ) as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc)
-            assert entity._is_daytime() is True
+            mock_dt.now.return_value = datetime(2026, 12, 15, 17, 0, tzinfo=timezone.utc)
+            assert entity._is_daytime() is False
 
 
 # ---------------------------------------------------------------------------
@@ -367,21 +364,67 @@ class TestIsDaytime:
 # ---------------------------------------------------------------------------
 
 class TestIsDtDaytime:
-    def test_noon_utc_is_daytime_for_austria(self, entity, current_coord):
-        current_coord.data = {"_lon": 15.0}  # lon=15 → local offset +1h
+    def test_noon_utc_is_daytime_for_austria(self, entity):
         dt = datetime(2024, 6, 15, 12, 0, tzinfo=timezone.utc)
         assert entity._is_dt_daytime(dt) is True
 
-    def test_midnight_utc_is_nighttime_for_austria(self, entity, current_coord):
-        current_coord.data = {"_lon": 15.0}
+    def test_midnight_utc_is_nighttime_for_austria(self, entity):
         dt = datetime(2024, 6, 15, 0, 0, tzinfo=timezone.utc)
         assert entity._is_dt_daytime(dt) is False
 
-    def test_defaults_to_austria_longitude_when_no_data(self, entity, current_coord):
-        current_coord.data = {}
-        dt = datetime(2024, 6, 15, 12, 0, tzinfo=timezone.utc)
-        # lon default = 14.0 → local ≈ 12.93 → daytime
+    def test_winter_evening_is_night(self, entity):
+        """18:00 CET im Dezember ist dunkel — das alte feste 6–21-Uhr-Fenster sagte Tag."""
+        dt = datetime(2026, 12, 15, 17, 0, tzinfo=timezone.utc)
+        assert entity._is_dt_daytime(dt) is False
+
+    def test_summer_evening_is_day(self, entity):
+        """20:00 CEST im Juni ist noch hell."""
+        dt = datetime(2026, 6, 15, 18, 0, tzinfo=timezone.utc)
         assert entity._is_dt_daytime(dt) is True
+
+    def test_hourly_forecast_judges_row_at_its_midpoint(
+        self, entity, current_coord, forecast_coord
+    ):
+        """Eine Stunde, deren Mitte nach Sonnenuntergang liegt, zählt als Nacht."""
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(hours_ahead=1, tcc=0.0)]
+        seen: list[datetime] = []
+
+        def fake_is_dt_daytime(dt):
+            seen.append(dt)
+            return False
+
+        entity._is_dt_daytime = fake_is_dt_daytime
+        forecasts = entity._build_hourly_forecasts()
+
+        row_start = datetime.fromisoformat(forecast_coord.data[0]["datetime"])
+        assert seen == [row_start + timedelta(minutes=30)]
+        assert forecasts[0].condition == "clear-night"
+
+
+# ---------------------------------------------------------------------------
+# Forecast push to subscribed frontend cards
+# ---------------------------------------------------------------------------
+
+class TestForecastPush:
+    def test_coordinator_update_pushes_forecast_to_listeners(self, entity):
+        entity.hass = MagicMock()
+        entity.async_update_listeners = MagicMock(return_value="push-coro")
+
+        entity._handle_coordinator_update()
+
+        entity.async_update_listeners.assert_called_once_with(None)
+        entity.hass.async_create_task.assert_called_once_with("push-coro")
+
+    def test_open_meteo_update_writes_state_and_pushes_forecast(self, entity):
+        entity.hass = MagicMock()
+        entity.async_write_ha_state = MagicMock()
+        entity.async_update_listeners = MagicMock(return_value="push-coro")
+
+        entity._handle_open_meteo_update()
+
+        entity.async_write_ha_state.assert_called_once_with()
+        entity.hass.async_create_task.assert_called_once_with("push-coro")
 
 
 # ---------------------------------------------------------------------------
