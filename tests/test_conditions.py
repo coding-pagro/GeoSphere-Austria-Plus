@@ -147,10 +147,11 @@ class TestSyCodeMapping:
         assert _sy(1, is_day=False) == "clear-night"
 
     def test_fair_daytime(self):
-        assert _sy(2) == "partlycloudy"
+        """Code 2 („Heiter“, 10–30 % Bewölkung) zählt wie Code 1 als sonnig."""
+        assert _sy(2) == "sunny"
 
     def test_fair_nighttime(self):
-        assert _sy(2, is_day=False) == "partlycloudy"
+        assert _sy(2, is_day=False) == "clear-night"
 
     # ------------------------------------------------------------------
     # Cloud cover codes

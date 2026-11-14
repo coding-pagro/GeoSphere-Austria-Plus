@@ -443,6 +443,57 @@ class TestForecastPush:
 # _build_hourly_forecasts
 # ---------------------------------------------------------------------------
 
+class TestForecastCloudCoverage:
+    """tcc (Anteil 0–1) erscheint als cloud_coverage in Prozent."""
+
+    def test_hourly_cloud_coverage_in_percent(self, entity, current_coord, forecast_coord):
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(tcc=0.34)]
+
+        assert entity._build_hourly_forecasts()[0].cloud_coverage == 34
+
+    def test_hourly_cloud_coverage_none_without_tcc(self, entity, current_coord, forecast_coord):
+        current_coord.data = {}
+        forecast_coord.data = [_future_entry(tcc=None)]
+
+        assert entity._build_hourly_forecasts()[0].cloud_coverage is None
+
+    def test_daily_cloud_coverage_is_mean_of_daily_window(
+        self, entity, current_coord, forecast_coord
+    ):
+        """Tageswert = Mittel über das Tagesfenster, klare Nachtstunden zählen nicht."""
+        current_coord.data = {}
+        base = (
+            datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        # lon=16.37: das Tagesfenster 6–21 Uhr Ortszeit sind die UTC-Stunden 5–19.
+        forecast_coord.data = [
+            {
+                "datetime": (base + timedelta(hours=hour)).isoformat(),
+                "t2m": 15.0,
+                "rain_acc": 0.0,
+                "snow_acc": 0.0,
+                "rh2m": 60.0,
+                "u10m": 1.0,
+                "v10m": 0.0,
+                "tcc": 0.8 if 5 <= hour <= 19 else 0.0,
+            }
+            for hour in range(24)
+        ]
+
+        assert entity._build_daily_forecasts()[0].cloud_coverage == 80
+
+    def test_hourly_symbol_2_reads_sunny(self, entity, current_coord, forecast_coord):
+        """Symbol 2 („Heiter“) ergibt dieselbe Condition wie geringe Bewölkung ohne Symbol."""
+        current_coord.data = {}
+        entity._is_dt_daytime = lambda _dt: True
+        forecast_coord.data = [_future_entry(tcc=0.2, sy=2.0), _future_entry(tcc=0.2)]
+
+        with_symbol, without_symbol = entity._build_hourly_forecasts()
+        assert with_symbol.condition == without_symbol.condition == "sunny"
+
+
 class TestBuildHourlyForecasts:
     def test_basic_entry_is_included(self, entity, current_coord, forecast_coord):
         current_coord.data = {"_lon": 14.0}

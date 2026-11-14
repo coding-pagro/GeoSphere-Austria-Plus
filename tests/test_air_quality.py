@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 
@@ -14,6 +16,7 @@ from custom_components.geosphere_austria_plus.sensor import (
     AirQualitySensorDescription,
     AIR_QUALITY_SENSORS,
     _compute_aqi_level,
+    _micrograms_per_cubic_meter,
 )
 from custom_components.geosphere_austria_plus.const import AQI_BREAKPOINTS
 
@@ -424,6 +427,28 @@ class TestAirQualitySensorMetadata:
     def test_four_aq_sensor_descriptions(self):
         params = {d.param for d in AIR_QUALITY_SENSORS}
         assert params == {"no2surf", "o3surf", "pm10surf", "pm25surf"}
+
+    def test_all_pollutant_sensors_use_micrograms_per_cubic_meter(self):
+        assert {d.native_unit_of_measurement for d in AIR_QUALITY_SENSORS} == {"μg/m³"}
+
+
+class TestMicrogramUnit:
+    """Die Einheit kommt je nach Home-Assistant-Version aus anderer Quelle."""
+
+    def test_uses_unit_of_density_when_available(self):
+        const = types.SimpleNamespace(
+            UnitOfDensity=types.SimpleNamespace(MICROGRAMS_PER_CUBIC_METER="new-unit"),
+            CONCENTRATION_MICROGRAMS_PER_CUBIC_METER="legacy-unit",
+        )
+        with patch.dict(sys.modules, {"homeassistant.const": const}):
+            assert _micrograms_per_cubic_meter() == "new-unit"
+
+    def test_falls_back_to_legacy_constant_before_2026_7(self):
+        const = types.SimpleNamespace(
+            CONCENTRATION_MICROGRAMS_PER_CUBIC_METER="legacy-unit",
+        )
+        with patch.dict(sys.modules, {"homeassistant.const": const}):
+            assert _micrograms_per_cubic_meter() == "legacy-unit"
 
 
 # ---------------------------------------------------------------------------

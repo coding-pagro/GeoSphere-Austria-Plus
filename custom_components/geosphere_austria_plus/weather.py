@@ -75,8 +75,8 @@ _HOURLY_ROW_MIDPOINT = timedelta(minutes=30)
 _SY_CONDITION_MAP: dict[int, str] = {
     # Codes 1–2: Cloudless / Fair
     1: "sunny",
+    2: "sunny",
     # Codes 3–5: Cloudy variations
-    2: "partlycloudy",
     3: "partlycloudy",
     4: "cloudy",
     5: "cloudy",
@@ -600,6 +600,7 @@ class GeoSphereWeatherEntity(
                 wind_bearing=wind_bearing,
                 native_wind_gust_speed=wind_gust,
                 native_pressure=entry.get("pressure"),
+                cloud_coverage=round(tcc * 100) if tcc is not None else None,
                 is_daytime=is_day,
             )
             # Forecast ist ein TypedDict — HA preserved zusätzliche Keys beim
@@ -774,6 +775,7 @@ class GeoSphereWeatherEntity(
                     if pressure_list
                     else None
                 ),
+                cloud_coverage=round(tcc_day * 100) if tcc_day is not None else None,
                 is_daytime=True,
             )
             if snowlmt_min is not None:

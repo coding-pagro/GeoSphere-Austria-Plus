@@ -160,7 +160,7 @@ Die GeoSphere-Modelle **NWP** und **Ensemble** liefern stündliche Daten für ru
 
 ### Attribute
 
-Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Luftfeuchtigkeit, Luftdruck) liefert die Integration je Forecast-Slot folgende Zusatzattribute, die in Dashboards (z. B. via `state_attr()`) verwendet werden können:
+Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Luftfeuchtigkeit, Luftdruck, Bewölkung) liefert die Integration je Forecast-Slot folgende Zusatzattribute, die in Dashboards (z. B. via `state_attr()`) verwendet werden können:
 
 | Attribut | Einheit | Quelle | Stündlich | Täglich |
 |---|---|---|---|---|
@@ -259,10 +259,10 @@ automation:
 
 ## Bekannte Einschränkungen
 
-- **Geographischer Geltungsbereich:** GeoSphere DataHub liefert nur Daten für **Österreich**. Außerhalb des österreichischen Bundesgebiets sind die Vorhersagen ungenau oder leer.
+- **Geographischer Geltungsbereich:** Die Vorhersagemodelle NWP und Ensemble decken Mitteleuropa von 43,0 bis 51,5° N und 5,0 bis 22,6° O ab, der Nowcast ein Rechteck um Österreich (45,5 bis 49,5° N, 8,1 bis 17,7° O), die Luftqualität 40,9 bis 53,7° N und 2,9 bis 23,7° O. TAWES-Stationen und Wetterwarnungen gibt es nur für Österreich. Liegt der Standort außerhalb des Gebiets eines gewählten Modells, lässt sich die Integration nicht einrichten; im Log steht dann „outside of dataset bounds".
 - **Nowcast hat kein Daily-Forecast:** Das Nowcast-Modell liefert nur 2–3 h Voraus — die Entität exponiert daher nur die stündliche Vorhersage, kein `forecast.daily`.
 - **Ensemble liefert kein Wettersymbol:** Ohne `sy` wird die Condition im Ensemble aus Bewölkung, Niederschlag und Wind abgeleitet; Gewitter (`lightning-rainy`) werden daher nur vom NWP-Modell erkannt.
-- **API-Rate-Limits unbekannt:** GeoSphere veröffentlicht keine harten Rate-Limits. Die Polling-Intervalle sind konservativ gewählt; bei produktivem Einsatz keine Reduzierung empfohlen.
+- **API-Rate-Limits:** Die GeoSphere-API erlaubt 5 Anfragen pro Sekunde und 240 pro Stunde und nennt beide Grenzen in jedem Antwort-Header. Ein Standort mit Station, einem Vorhersagemodell und Luftqualität verursacht rund 8 Anfragen pro Stunde; jedes weitere Modell eine zusätzliche.
 - **Warnungs-API ist deutsch-only:** Die Warntexte aus `warnungen.zamg.at` sind ausschließlich deutsch.
 
 ---
