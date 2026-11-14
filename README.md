@@ -148,6 +148,8 @@ Die Condition wird aus den TAWES-Echtzeitdaten abgeleitet (Priorität höchste z
 | 8 | `windy` | FF ≥ 10 m/s |
 | 9 | `sunny` / `clear-night` | Default |
 
+Die Sonnenscheindauer (SO) sagt nur etwas über die Bewölkung aus, solange die Sonne mindestens 5° über dem Horizont steht; darunter ist sie auch bei klarem Himmel null. Nachts, in der Dämmerung oder an Stationen ohne SO-Messung kommt die Bewölkung für Priorität 6 und 7 deshalb aus der laufenden Vorhersagestunde. Abschattung durch Berge erkennt die Integration nicht: Liegt die Station im Tal im Schatten, kann sie trotz klarem Himmel `cloudy` melden.
+
 Ist keine TAWES-Station konfiguriert, werden alle aktuellen Werte (Condition, Temperatur, Feuchte, Wind, Niederschlag) aus dem ersten verfügbaren Vorhersagepunkt abgeleitet. Der Taupunkt bleibt leer, da die Modelle ihn nicht liefern; beim Nowcast fehlt zusätzlich der Luftdruck.
 
 Für die **Vorhersage** werden vorrangig der GeoSphere-Symbolcode (`sy`, alle 32 Codes inkl. Gewitter), sowie Wolkenbedeckung (`tcc`), Niederschlag (`rain_acc`, `snow_acc`) und Wind aus dem NWP-Modell verwendet. Bei stündlichen Vorhersagen wird `sy` direkt verwendet; für Tagesvorhersagen wird der ungünstigste (signifikanteste) `sy`-Code der Tagesstunden herangezogen. Akkumulierte Niederschlagssummen können die symbolbasierte Bedingung überschreiben, jedoch nicht `lightning-rainy` abstufen. Hohe Windgeschwindigkeiten (≥ 10 m/s) ergeben `windy` bzw. `windy-variant` bei klaren oder bewölkten Bedingungen.

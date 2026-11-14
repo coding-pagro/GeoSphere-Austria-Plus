@@ -51,7 +51,7 @@ Optional sources (TAWES, warnings, air quality, Open-Meteo) keep their coordinat
 - Rain: RR ≥ 0.2 mm/10 min → `rainy`
 - Snow: SH > 0.1 cm → `snowy`
 - Fog: RF ≥ 97% AND FF < 2 m/s → `fog`
-- Overcast / partly cloudy: based on SO (sunshine duration)
+- Overcast / partly cloudy: based on SO (sunshine duration) while the sun is at least 5° high (`_SUNSHINE_MIN_ELEVATION_DEG`); below that SO is 0 under any sky, so the cloud cover of the current forecast hour is used instead. The Nowcast `tcc` blend uses the same rule (`_sunshine_cloud_fraction`).
 - Windy: FF ≥ 10 m/s
 - Default: `sunny` / `clear-night`
 
@@ -94,7 +94,7 @@ Beyond standard HA Forecast fields (`native_temperature`, `native_precipitation`
 
 ## Testing
 
-611 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Because the coordinator base class is a stand-in, any type-only stub on a mixin must sit under `if TYPE_CHECKING:` — a runtime method on `_RetryMixin` would shadow `DataUpdateCoordinator` in the MRO (`TestAsyncRefreshReachesBase` guards this). Key test files:
+619 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Because the coordinator base class is a stand-in, any type-only stub on a mixin must sit under `if TYPE_CHECKING:` — a runtime method on `_RetryMixin` would shadow `DataUpdateCoordinator` in the MRO (`TestAsyncRefreshReachesBase` guards this). Key test files:
 
 - `test_api.py` — HTTP client, parameter URL building, GeoJSON parsing, v2 + nowcast normalisation (names, units).
 - `test_coordinator.py` — Fibonacci-backoff retry, last-known-good caching.

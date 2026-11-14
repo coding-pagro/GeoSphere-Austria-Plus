@@ -64,6 +64,11 @@ _FOG_VISIBILITY_HUM = 97       # RF > 97 % → potentiell Nebel
 _WIND_STRONG_MS = 10.0         # FF > 10 m/s → windig
 _CLOUD_FULL = 0.875            # Als bewölkt gilt > 87.5 % SO-Ausfall
 _SUN_SECONDS_MAX = 600         # SO max. 600 s Sonnenschein je 10-Minuten-Intervall
+# Sonnenhöhe, ab der SO etwas über die Bewölkung aussagt. Darunter ist SO auch
+# bei klarem Himmel 0: Am wolkenlosen Morgen des 2026-11-14 zählte Wien Hohe
+# Warte ab rund 3° Sonnenhöhe, volle 600 s ab 4,4°. Abschattung durch Berge
+# deckt die Schwelle nicht ab.
+_SUNSHINE_MIN_ELEVATION_DEG = 5.0
 
 # Tag/Nacht einer Vorhersagestunde wird in ihrer Mitte beurteilt, damit eine
 # überwiegend dunkle Stunde als Nacht zählt.
@@ -462,7 +467,8 @@ class GeoSphereWeatherEntity(
           2. Normaler Regen (RR > minimaler Schwellenwert)
           3. Schnee (SH vorhanden)
           4. Nebel (RF sehr hoch)
-          5. Bewölkt / Teilweise bewölkt (über Sonnenscheindauer SO)
+          5. Bewölkt / Teilweise bewölkt (über Sonnenscheindauer SO, bei zu
+             tiefer Sonne über die Bewölkung der laufenden Vorhersagestunde)
           6. Windig
           7. Sonnig / Klare Nacht
         """
@@ -470,7 +476,6 @@ class GeoSphereWeatherEntity(
         rr = d.get("RR") or 0.0
         rf = d.get("RF") or 0.0
         ff = d.get("FF") or 0.0
-        so = d.get("SO")
         sh = d.get("SH") or 0.0
 
         if sh > _SNOW_THRESHOLD_CM and rr >= _RAIN_THRESHOLD_MM:
@@ -483,8 +488,10 @@ class GeoSphereWeatherEntity(
             return "snowy"
         if rf >= _FOG_VISIBILITY_HUM and ff < 2.0:
             return "fog"
-        if so is not None:
-            cloud_fraction = 1.0 - (so / _SUN_SECONDS_MAX)
+        cloud_fraction = self._sunshine_cloud_fraction()
+        if cloud_fraction is None:
+            cloud_fraction = self._forecast_cloud_fraction_now()
+        if cloud_fraction is not None:
             if cloud_fraction >= _CLOUD_FULL:
                 if ff >= _WIND_STRONG_MS:
                     return "windy-variant"
@@ -524,6 +531,33 @@ class GeoSphereWeatherEntity(
             sy = entry.get("sy") if is_nwp else None
             return nwp_to_condition(tcc, rain, snow, wind_speed, is_day, sy)
         return None
+
+    def _sunshine_is_measurable(self) -> bool:
+        """True, wenn die Sonne hoch genug steht, dass SO Bewölkung anzeigt."""
+        now = datetime.now(timezone.utc)
+        elevation = solar_elevation(Observer(self._lat, self._lon), now)
+        return bool(elevation >= _SUNSHINE_MIN_ELEVATION_DEG)
+
+    def _sunshine_cloud_fraction(self) -> float | None:
+        """Bewölkungsanteil (0–1) aus der TAWES-Sonnenscheindauer, sonst None.
+
+        None auch bei zu tiefer Sonne: Dann ist SO bei jedem Himmel 0 und
+        ergäbe volle Bewölkung.
+        """
+        if self._current_coordinator is None or not self._current_coordinator.data:
+            return None
+        so = self._current_coordinator.data.get("SO")
+        if so is None or not self._sunshine_is_measurable():
+            return None
+        return 1.0 - min(float(so) / _SUN_SECONDS_MAX, 1.0)
+
+    def _forecast_cloud_fraction_now(self) -> float | None:
+        """Bewölkungsanteil (0–1) der laufenden Vorhersagestunde, sonst None."""
+        entry = self._first_forecast_entry
+        tcc = entry.get("tcc") if entry else None
+        if tcc is None and "nowcast" in self._model:
+            tcc = self._resolve_tcc_for_nowcast(datetime.now(timezone.utc))
+        return cast("float | None", tcc)
 
     def _is_daytime(self) -> bool:
         """Tag/Nacht aus sun.sun-Entity ableiten; Fallback auf berechneten Sonnenstand."""
@@ -849,13 +883,7 @@ class GeoSphereWeatherEntity(
             break
 
         # TAWES-tcc-Proxy aus aktueller Sonnenscheindauer (konstant pro Build)
-        tcc_tawes: float | None = None
-        if self._current_coordinator and self._current_coordinator.data:
-            so = self._current_coordinator.data.get("SO")
-            if so is not None:
-                tcc_tawes = 1.0 - min(float(so) / _SUN_SECONDS_MAX, 1.0)
-
-        return nwp_data, tcc_tawes
+        return nwp_data, self._sunshine_cloud_fraction()
 
     def _resolve_tcc_with_context(
         self,
