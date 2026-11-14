@@ -42,6 +42,7 @@ Optional sources (TAWES, warnings, air quality, Open-Meteo) keep their coordinat
 | `sensor.py` | TAWES sensors (13 of them, including `soil_temperature_10cm`), air-quality sensors, AQI aggregation, warning-level sensor with all-warnings attributes. |
 | `config_flow.py` | Config UI, options flow, station validation. |
 | `const.py` | API endpoints, parameter lists for each model, ensemble→NWP normalisation map, AQI breakpoints, condition thresholds, polling intervals. |
+| `daily_window.py` | `in_daily_window`: the 6–21 h local-solar window that daily aggregation uses for both GeoSphere days and Open-Meteo tail days (cloud cover is the window mean on both sides). |
 
 ### Weather Condition Derivation
 
@@ -94,7 +95,7 @@ Beyond standard HA Forecast fields (`native_temperature`, `native_precipitation`
 
 ## Testing
 
-619 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Because the coordinator base class is a stand-in, any type-only stub on a mixin must sit under `if TYPE_CHECKING:` — a runtime method on `_RetryMixin` would shadow `DataUpdateCoordinator` in the MRO (`TestAsyncRefreshReachesBase` guards this). Key test files:
+629 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Because the coordinator base class is a stand-in, any type-only stub on a mixin must sit under `if TYPE_CHECKING:` — a runtime method on `_RetryMixin` would shadow `DataUpdateCoordinator` in the MRO (`TestAsyncRefreshReachesBase` guards this). Key test files:
 
 - `test_api.py` — HTTP client, parameter URL building, GeoJSON parsing, v2 + nowcast normalisation (names, units).
 - `test_coordinator.py` — Fibonacci-backoff retry, last-known-good caching.

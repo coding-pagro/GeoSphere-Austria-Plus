@@ -173,7 +173,7 @@ Zusätzlich zu den HA-Standardfeldern (Temperatur, Niederschlag, Wind, Böen, Lu
 
 - **`snow_altitude`** ist die Schneefallgrenze in Metern – hochrelevant im Bergland. Im Tagesforecast wird das Tagesminimum geliefert (= tiefstes Niveau, auf das Schneefall reicht).
 - **`cape`** quantifiziert das Gewitterpotenzial. Werte >1000 J/kg deuten auf Gewitter hin, >2500 auf schwere Gewitter. Im Tagesforecast wird das Tagesmaximum geliefert.
-- **`uv_index`** ist das WMO-UV-Tagesmaximum. Wird nur befüllt, wenn die Open-Meteo-Verlängerung aktiviert ist, und nur für die Tage, die Open-Meteo abdeckt (d. h. nach Ablauf der GeoSphere-Daten). Zusätzlich werden für diese Tage die HA-Standardfelder `apparent_temperature`, `dew_point`, `cloud_coverage`, `pressure`, `precipitation_probability` aus Open-Meteo befüllt.
+- **`uv_index`** ist das WMO-UV-Tagesmaximum. Wird nur befüllt, wenn die Open-Meteo-Verlängerung aktiviert ist, und nur für die Tage, die Open-Meteo abdeckt (d. h. nach Ablauf der GeoSphere-Daten). Zusätzlich werden für diese Tage die HA-Standardfelder `apparent_temperature`, `dew_point`, `cloud_coverage`, `pressure`, `precipitation_probability` aus Open-Meteo befüllt. `cloud_coverage` ist dabei wie bei den GeoSphere-Tagen das Mittel über die Tagstunden (6 bis 21 Uhr Ortszeit), damit die Werte an der Grenze zwischen beiden Quellen vergleichbar bleiben.
 
 ---
 
@@ -261,7 +261,7 @@ automation:
 
 ## Bekannte Einschränkungen
 
-- **Geographischer Geltungsbereich:** Die Vorhersagemodelle NWP und Ensemble decken Mitteleuropa von 43,0 bis 51,5° N und 5,0 bis 22,6° O ab, der Nowcast ein Rechteck um Österreich (45,5 bis 49,5° N, 8,1 bis 17,7° O), die Luftqualität 40,9 bis 53,7° N und 2,9 bis 23,7° O. TAWES-Stationen und Wetterwarnungen gibt es nur für Österreich. Liegt der Standort außerhalb des Gebiets eines gewählten Modells, lässt sich die Integration nicht einrichten; im Log steht dann „outside of dataset bounds".
+- **Geltungsbereich:** Die Integration ist für Standorte in Österreich gedacht.
 - **Nowcast hat kein Daily-Forecast:** Das Nowcast-Modell liefert nur 2–3 h Voraus — die Entität exponiert daher nur die stündliche Vorhersage, kein `forecast.daily`.
 - **Ensemble liefert kein Wettersymbol:** Ohne `sy` wird die Condition im Ensemble aus Bewölkung, Niederschlag und Wind abgeleitet; Gewitter (`lightning-rainy`) werden daher nur vom NWP-Modell erkannt.
 - **API-Rate-Limits:** Die GeoSphere-API erlaubt 5 Anfragen pro Sekunde und 240 pro Stunde und nennt beide Grenzen in jedem Antwort-Header. Ein Standort mit Station, einem Vorhersagemodell und Luftqualität verursacht rund 8 Anfragen pro Stunde; jedes weitere Modell eine zusätzliche.

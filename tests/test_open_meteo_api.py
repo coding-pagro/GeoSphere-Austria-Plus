@@ -87,6 +87,14 @@ class TestRequestParameters:
         assert params["precipitation_unit"] == "mm"
         assert params["wind_speed_unit"] == "ms"
 
+    async def test_hourly_cloud_cover_requested(self):
+        session = _make_session(_make_daily_response([], weather_code=[]))
+
+        await fetch_open_meteo_daily(session, 48.21, 16.37)
+
+        params = session.get.call_args.kwargs["params"]
+        assert params["hourly"] == "cloud_cover"
+
     async def test_lat_lon_passed(self):
         session = _make_session(_make_daily_response([], weather_code=[]))
 
@@ -208,6 +216,64 @@ class TestJsonParsing:
         result = await fetch_open_meteo_daily(session, 48.21, 16.37)
 
         assert len(result) == 5
+
+
+# ---------------------------------------------------------------------------
+# Daily cloud cover over the daily window (same definition as GeoSphere days)
+# ---------------------------------------------------------------------------
+
+def _hourly_for(day: str, values: list) -> dict:
+    """24 hourly cloud_cover values for one UTC day."""
+    return {
+        "time": [f"{day}T{hour:02d}:00" for hour in range(24)],
+        "cloud_cover": values,
+    }
+
+
+class TestDaytimeCloudCover:
+    """lon 16.37: das Fenster 6–21 Uhr Ortssonnenzeit sind die UTC-Stunden 5–19."""
+
+    async def test_uses_daytime_mean_instead_of_24h_mean(self):
+        day = _today_plus(1)
+        values = [0] * 5 + [90] * 15 + [0] * 4
+        response = _make_daily_response([day], weather_code=[3], cloud_cover_mean=[56.0])
+        response["hourly"] = _hourly_for(day, values)
+        session = _make_session(response)
+
+        result = await fetch_open_meteo_daily(session, 48.21, 16.37)
+
+        assert result[0]["cloud_coverage"] == 90
+
+    async def test_null_hours_are_ignored(self):
+        day = _today_plus(1)
+        values = [None] * 5 + [80] * 10 + [None] * 9
+        response = _make_daily_response([day], weather_code=[3], cloud_cover_mean=[33.0])
+        response["hourly"] = _hourly_for(day, values)
+        session = _make_session(response)
+
+        result = await fetch_open_meteo_daily(session, 48.21, 16.37)
+
+        assert result[0]["cloud_coverage"] == 80
+
+    async def test_falls_back_to_24h_mean_without_daytime_hours(self):
+        day = _today_plus(1)
+        response = _make_daily_response([day], weather_code=[3], cloud_cover_mean=[41.6])
+        response["hourly"] = _hourly_for(day, [None] * 24)
+        session = _make_session(response)
+
+        result = await fetch_open_meteo_daily(session, 48.21, 16.37)
+
+        assert result[0]["cloud_coverage"] == 42
+
+    async def test_falls_back_to_24h_mean_without_hourly_block(self):
+        day = _today_plus(1)
+        session = _make_session(
+            _make_daily_response([day], weather_code=[3], cloud_cover_mean=[41.6])
+        )
+
+        result = await fetch_open_meteo_daily(session, 48.21, 16.37)
+
+        assert result[0]["cloud_coverage"] == 42
 
 
 # ---------------------------------------------------------------------------

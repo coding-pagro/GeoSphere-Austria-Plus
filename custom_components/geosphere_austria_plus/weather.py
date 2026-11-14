@@ -43,6 +43,7 @@ from .const import (
     OPEN_METEO_DAY_COVERAGE_HOUR,
     OPEN_METEO_FORECAST_DAYS_DEFAULT,
 )
+from .daily_window import in_daily_window
 from .coordinator import (
     GeoSphereCurrentCoordinator,
     GeoSphereForecastCoordinator,
@@ -985,8 +986,7 @@ class GeoSphereWeatherEntity(
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         except ValueError:
             return False
-        local_hour = (dt.hour + self._lon / 15.0) % 24
-        return 6.0 <= local_hour < 21.0
+        return in_daily_window(dt, self._lon)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
