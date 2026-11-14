@@ -89,7 +89,13 @@ class _MockDataUpdateCoordinator:
         pass
 
     async def async_refresh(self):
-        pass
+        """Mirror HA: run _async_update_data, keep old data on failure, never raise."""
+        try:
+            self.data = await self._async_update_data()
+        except Exception:
+            self.last_update_success = False
+        else:
+            self.last_update_success = True
 
     def async_add_listener(self, func):
         return lambda: None
