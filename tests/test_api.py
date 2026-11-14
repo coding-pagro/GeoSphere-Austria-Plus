@@ -400,7 +400,7 @@ class TestGetForecast:
         """v2-Namen → interne Namen; tcc % → 0–1, msl Pa → hPa, Rest unverändert.
 
         Momentanwerte stehen an ihrem eigenen Zeitstempel, Intervallwerte
-        (10fg, rain, sf, ssrd, sy) am folgenden — wie am Laufbeginn der API.
+        (10fg, rain, sf, ssrd, sy) und tcc am folgenden — wie am Laufbeginn der API.
         """
         payload = _make_forecast_payload(
             ["2024-06-01T12:00:00Z", "2024-06-01T13:00:00Z"],
@@ -427,7 +427,7 @@ class TestGetForecast:
             "wind_gust_speed": 11.5,
             "rain_acc": 0.4,
             "snow_acc": 0.1,
-            "tcc": pytest.approx(0.915),
+            "tcc": pytest.approx(0.80),
             "grad": 395.5,
             "sy": 5.0,
             "snowlmt": 1271.1,
@@ -465,6 +465,23 @@ class TestGetForecast:
         assert [e["wind_gust_speed"] for e in result] == [9.0, 15.0]
         # Momentanwerte bleiben an ihrem Zeitstempel
         assert [e["t2m"] for e in result] == [10.0, 11.0]
+
+    async def test_tcc_moves_with_the_weather_symbol(self):
+        """tcc ist ein Momentanwert, die Bewölkungsstufen von sy geben aber tcc
+        an sys eigenem Zeitstempel wieder. tcc wandert deshalb mit sy, damit
+        Condition und cloud_coverage eines Eintrags zusammenpassen."""
+        payload = _make_forecast_payload(
+            ["2024-06-01T00:00:00Z", "2024-06-01T01:00:00Z", "2024-06-01T02:00:00Z"],
+            sy=[None, 1.0, 5.0],
+            tcc=[50.0, 5.0, 95.0],
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=_make_mock_response(payload))
+
+        result = await GeoSphereApi(session).get_forecast(48.21, 16.37, "nwp-v2-1h-1km")
+
+        assert [e["sy"] for e in result] == [1.0, 5.0]
+        assert [e["tcc"] for e in result] == [pytest.approx(0.05), pytest.approx(0.95)]
 
     async def test_single_timestep_yields_no_forecast(self):
         """Ein einzelner Zeitschritt hat keinen Nachfolger für die Intervallwerte."""
@@ -515,7 +532,7 @@ class TestGetForecast:
         assert result[0]["wind_gust_speed"] == 11.5
         assert result[0]["rain_acc"] == 0.5
         assert result[0]["snow_acc"] == 0.0
-        assert result[0]["tcc"] == pytest.approx(0.525)
+        assert result[0]["tcc"] == pytest.approx(0.40)
         assert result[0]["grad"] == 345.2
         assert result[0]["snowlmt"] == 1128.0
         assert result[0]["cape"] == 0.6
