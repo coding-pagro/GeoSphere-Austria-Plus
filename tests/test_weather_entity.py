@@ -4,7 +4,19 @@ import pytest
 from datetime import date, datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.geosphere_austria_plus.weather import GeoSphereWeatherEntity
+from custom_components.geosphere_austria_plus.const import (
+    CONF_FORECAST_MODELS,
+    CONF_LATITUDE,
+    CONF_LONGITUDE,
+    CONF_NAME,
+    CONF_OPEN_METEO_FORECAST_DAYS,
+    DATA_FORECASTS,
+    DOMAIN,
+)
+from custom_components.geosphere_austria_plus.weather import (
+    GeoSphereWeatherEntity,
+    async_setup_entry,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1960,3 +1972,121 @@ class TestAttribution:
             open_meteo_coordinator=om,
         )
         assert "Open-Meteo" not in ent.attribution
+
+
+# ---------------------------------------------------------------------------
+# Platform setup (async_setup_entry) and listener wiring
+# ---------------------------------------------------------------------------
+
+class TestPlatformSetup:
+    """async_setup_entry reicht Standort und Modelle an die Wetterentitäten durch."""
+
+    NWP = "nwp-v2-1h-1km"
+    ENSEMBLE = "ensemble-v2-1h-1km"
+
+    @staticmethod
+    def _setup_args(data, options=None, models=(NWP,)):
+        coordinators = {DATA_FORECASTS: {model: MagicMock() for model in models}}
+        hass = MagicMock()
+        hass.data = {DOMAIN: {"entry1": coordinators}}
+        entry = MagicMock()
+        entry.entry_id = "entry1"
+        entry.title = "Wien"
+        entry.data = data
+        entry.options = options or {}
+        return hass, entry, coordinators, MagicMock()
+
+    async def test_passes_location_from_entry_data(self):
+        hass, entry, coordinators, add_entities = self._setup_args({
+            CONF_NAME: "Wien",
+            CONF_LATITUDE: 48.2,
+            CONF_LONGITUDE: 16.37,
+            CONF_FORECAST_MODELS: [self.NWP],
+        })
+
+        await async_setup_entry(hass, entry, add_entities)
+
+        (entities,) = add_entities.call_args[0]
+        assert len(entities) == 1
+        assert entities[0]._lat == 48.2
+        assert entities[0]._lon == 16.37
+        assert coordinators["_active_unique_ids"] == {f"geosphere_plus_entry1_{self.NWP}"}
+
+    async def test_options_override_location_and_models(self):
+        hass, entry, _, add_entities = self._setup_args(
+            {
+                CONF_LATITUDE: 48.2,
+                CONF_LONGITUDE: 16.37,
+                CONF_FORECAST_MODELS: [self.NWP],
+            },
+            options={
+                CONF_LATITUDE: 47.07,
+                CONF_LONGITUDE: 15.44,
+                CONF_FORECAST_MODELS: [self.NWP, self.ENSEMBLE],
+                CONF_OPEN_METEO_FORECAST_DAYS: 10,
+            },
+            models=(self.NWP, self.ENSEMBLE),
+        )
+
+        await async_setup_entry(hass, entry, add_entities)
+
+        (entities,) = add_entities.call_args[0]
+        assert [e._model for e in entities] == [self.NWP, self.ENSEMBLE]
+        assert all(e._lat == 47.07 and e._lon == 15.44 for e in entities)
+        assert all(e._open_meteo_forecast_days == 10 for e in entities)
+
+    async def test_legacy_entry_without_model_list_uses_default_model(self):
+        hass, entry, _, add_entities = self._setup_args(
+            {CONF_LATITUDE: 48.2, CONF_LONGITUDE: 16.37}
+        )
+
+        await async_setup_entry(hass, entry, add_entities)
+
+        (entities,) = add_entities.call_args[0]
+        assert [e._model for e in entities] == [self.NWP]
+
+    async def test_no_models_creates_no_entities(self):
+        hass, entry, coordinators, add_entities = self._setup_args(
+            {CONF_LATITUDE: 48.2, CONF_LONGITUDE: 16.37, CONF_FORECAST_MODELS: []},
+            models=(),
+        )
+
+        await async_setup_entry(hass, entry, add_entities)
+
+        add_entities.assert_called_once_with([])
+        assert coordinators["_active_unique_ids"] == set()
+
+
+class TestAddedToHass:
+    """Die Entität hört auch auf den TAWES- und den Open-Meteo-Coordinator."""
+
+    async def test_registers_listeners_on_optional_coordinators(self, forecast_coord):
+        current, open_meteo = MagicMock(), MagicMock()
+        ent = GeoSphereWeatherEntity(
+            current_coordinator=current,
+            forecast_coordinator=forecast_coord,
+            entry_id="x",
+            model="nwp-v2-1h-1km",
+            location_name="Test",
+            open_meteo_coordinator=open_meteo,
+        )
+
+        await ent.async_added_to_hass()
+
+        current.async_add_listener.assert_called_once_with(ent.async_write_ha_state)
+        open_meteo.async_add_listener.assert_called_once_with(
+            ent._handle_open_meteo_update
+        )
+
+    async def test_without_optional_coordinators_registers_nothing(self, forecast_coord):
+        ent = GeoSphereWeatherEntity(
+            current_coordinator=None,
+            forecast_coordinator=forecast_coord,
+            entry_id="x",
+            model="nwp-v2-1h-1km",
+            location_name="Test",
+        )
+
+        await ent.async_added_to_hass()
+
+        forecast_coord.async_add_listener.assert_not_called()

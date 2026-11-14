@@ -39,6 +39,11 @@ class _MockWeatherEntity:
         """Mirror HA: derive from _attr_supported_features class/instance attribute."""
         return getattr(self, "_attr_supported_features", 0)
 
+    @property
+    def unique_id(self):
+        """Mirror HA: Entity.unique_id is backed by _attr_unique_id."""
+        return getattr(self, "_attr_unique_id", None)
+
 
 class _MockCoordinatorEntity:
     def __class_getitem__(cls, item):
