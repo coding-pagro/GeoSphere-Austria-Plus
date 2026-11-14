@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import aiohttp
 from homeassistant.core import CoreState, HomeAssistant, callback
@@ -45,9 +45,10 @@ class _RetryMixin:
     hass: HomeAssistant
     _last_good_data: Any
 
-    async def async_refresh(self) -> None:  # noqa: D401 — provided by DataUpdateCoordinator
-        """Provided by DataUpdateCoordinator at runtime."""
-        ...
+    if TYPE_CHECKING:
+        # Nur für mypy: Zur Laufzeit stünde die Methode in der MRO vor
+        # DataUpdateCoordinator.async_refresh und machte jeden Aufruf zum No-op.
+        async def async_refresh(self) -> None: ...
 
     def _retry_init(self) -> None:
         self._retry_step: int = 0
@@ -63,8 +64,12 @@ class _RetryMixin:
         if self._cancel_retry is not None:
             self._cancel_retry()
             self._cancel_retry = None
-        if self._pending_retry_task is not None and not self._pending_retry_task.done():
-            self._pending_retry_task.cancel()
+        task = self._pending_retry_task
+        # Läuft der Aufruf im Retry-Task selbst (Erfolg oder erneuter Fehler des
+        # Retry-Abrufs), darf er sich nicht abbrechen: Der Task endete sonst als
+        # abgebrochen statt mit den frisch geholten Daten.
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            task.cancel()
         self._pending_retry_task = None
 
     def _retry_on_success(self, data: Any) -> Any:
