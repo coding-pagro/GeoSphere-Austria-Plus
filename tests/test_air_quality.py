@@ -428,9 +428,6 @@ class TestAirQualitySensorMetadata:
         params = {d.param for d in AIR_QUALITY_SENSORS}
         assert params == {"no2surf", "o3surf", "pm10surf", "pm25surf"}
 
-    def test_all_pollutant_sensors_use_micrograms_per_cubic_meter(self):
-        assert {d.native_unit_of_measurement for d in AIR_QUALITY_SENSORS} == {"μg/m³"}
-
 
 class TestMicrogramUnit:
     """Die Einheit kommt je nach Home-Assistant-Version aus anderer Quelle."""
