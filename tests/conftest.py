@@ -83,6 +83,7 @@ class _MockDataUpdateCoordinator:
     def __init__(self, hass=None, logger=None, name=None, update_interval=None):
         self.data = None
         self.hass = hass
+        self.last_update_success = True
 
     async def async_request_refresh(self):
         pass
@@ -110,7 +111,10 @@ class _MockUpdateFailed(Exception):
 # ---------------------------------------------------------------------------
 
 class _MockSensorEntity:
-    pass
+    @property
+    def unique_id(self):
+        """Mirror HA: Entity.unique_id is backed by _attr_unique_id."""
+        return getattr(self, "_attr_unique_id", None)
 
 
 class _MockSensorDeviceClass:

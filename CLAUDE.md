@@ -30,6 +30,8 @@ All four coordinators inherit a `_RetryMixin` that:
 - on failure, schedules an accelerated retry on a Fibonacci backoff: **1 → 2 → 3 → 5 → 8 → 13 → 21 → 30 min** (capped at 30 min)
 - on success, cancels any pending retry and resets the backoff counter
 
+Optional sources (TAWES, warnings, air quality, Open-Meteo) keep their coordinator when the first refresh at setup fails (`_async_refresh_optional` in `__init__.py`): their entities are created as unavailable and recover on the next regular poll. Dropping the coordinator instead would make the stale-entity cleanup remove those entities until the next reload. Only forecast coordinators abort setup (`ConfigEntryNotReady`, Home Assistant retries).
+
 ### Key Files
 
 | File | Responsibility |
@@ -92,7 +94,7 @@ Beyond standard HA Forecast fields (`native_temperature`, `native_precipitation`
 
 ## Testing
 
-586 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Key test files:
+595 unit tests in `tests/`, run with `pytest`. Test infrastructure mocks Home Assistant modules in `tests/conftest.py` (no real HA installation required). Key test files:
 
 - `test_api.py` — HTTP client, parameter URL building, GeoJSON parsing, v2 + nowcast normalisation (names, units).
 - `test_coordinator.py` — Fibonacci-backoff retry, last-known-good caching.

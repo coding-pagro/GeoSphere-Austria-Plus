@@ -181,6 +181,8 @@ Die GeoSphere-API ist gelegentlich nicht erreichbar. Damit Sensoren nicht für S
 
 Zusätzlich planen die Coordinatoren bei einem Fehler beschleunigte Wiederholversuche mit Fibonacci-Abständen: **1 → 2 → 3 → 5 → 8 → 13 → 21 → 30 min** (Maximum). Sobald die API wieder antwortet, fällt der Backoff zurück auf das reguläre Polling-Intervall (10 min für TAWES, 60 min für Vorhersage).
 
+Schlägt schon der erste Abruf nach dem Start fehl, gibt es noch keine Daten zum Überbrücken. Die betroffenen Sensoren (TAWES, Warnungen, Luftqualität) sind dann *„nicht verfügbar"* und liefern Werte, sobald der nächste reguläre Abruf gelingt. Scheitert der erste Abruf der Vorhersage, wiederholt Home Assistant die Einrichtung von selbst.
+
 ---
 
 ## Data Updates
@@ -269,7 +271,7 @@ automation:
 
 | Symptom | Ursache | Lösung |
 |---|---|---|
-| Sensoren bleiben auf "Nicht verfügbar" | API hat noch keinen erfolgreichen Refresh geschafft | Im Log nach `geosphere_austria_plus` filtern; Fibonacci-Retry läuft automatisch (max. 30 min) |
+| Sensoren bleiben auf "Nicht verfügbar" | API hat noch keinen erfolgreichen Refresh geschafft | Im Log nach `geosphere_austria_plus` filtern; der nächste Versuch folgt automatisch im regulären Abrufintervall (10 bis 60 min) |
 | Wetter-Entität fehlt | 0 Modelle in Konfiguration ausgewählt | In Optionen mindestens ein Forecast-Modell wählen |
 | TAWES-Sensoren fehlen | Keine TAWES-Station konfiguriert | In Optionen Station auswählen |
 | Forecast hat keine Daten | API-Modell antwortet zu langsam beim ersten Setup | Integration neu laden — `ConfigEntryNotReady` triggert automatischen Retry |

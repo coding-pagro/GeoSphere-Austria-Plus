@@ -782,8 +782,10 @@ class GeoSphereWeatherEntity(
                 daily_entry["cape"] = round(cape_max)  # type: ignore[typeddict-unknown-key]
             gs_days[day_key] = daily_entry
 
-        # --- Without Open-Meteo: original behaviour (max 7 GeoSphere days) ---
-        if self._open_meteo_coordinator is None:
+        # --- Without Open-Meteo data: original behaviour (max 7 GeoSphere days) ---
+        # Also applies while Open-Meteo has not delivered yet: incomplete
+        # GeoSphere days must not be dropped when nothing can replace them.
+        if self._open_meteo_coordinator is None or not self._open_meteo_coordinator.data:
             return [gs_days[k] for k in sorted(gs_days.keys())[:7]]
 
         # --- With Open-Meteo: drop incomplete GeoSphere days, then merge ---
